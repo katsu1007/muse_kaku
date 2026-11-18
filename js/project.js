@@ -12,6 +12,7 @@ import { readWithFixtures, oldFaceLights, roomOpenRuns, FIX_NAMES, FIX_ITEMS, FI
 import { planView, roomColor } from './planview.js';
 import { classifyBox, classifyCluster, SYM_VERDICTS, SYM_DICT } from './symdict.js';
 import { detectFurniture } from './furndetect.js';
+import { judgeRooms, ROOM_JUDGE } from './roomjudge.js';
 import { USES, DEF_LM, needCount, pitchFor, luxOf, wirePlan, cableQty, pip, polyD } from './lighting.js';
 /* iPhone・iPad では、選べるファイルの種類を絞ると .jww・.jwc・.dxf が灰色になって選べない（iPhone がこの拡張子を知らないため）。
    なので iPhone・iPad では絞らない。何を選んでも、読み込む時に拡張子で見分けるので困らない */
@@ -270,7 +271,7 @@ function drawingCard(p) {
     ${oldReadRow(d)}${sheetRow(d)}<div id="dwgView"></div>${sheetNotes(d)}${titleRow(p)}
     <div class="addbar" style="margin-top:10px" id="dwgBar"></div></div>
     <div id="dwgDemo"></div>
-    <div id="dwgFix">${fixSummary(d)}</div><div id="dwgSym">${symSummary(d)}</div>${elecRow(p)}
+    <div id="dwgFix">${fixSummary(d)}</div><div id="dwgSym">${symSummary(d)}</div><div id="dwgRoom">${roomSummary(d)}</div>${elecRow(p)}
     <details class="more"><summary>区画の一覧から選ぶ（図面で押しにくい小さい区画など）</summary><div class="facelist" id="dwgFaces"></div></details>
     ${r2row(d)}
     <div class="small muted" id="dwgStatus" style="margin-top:6px"></div></div>`;
@@ -432,6 +433,30 @@ function symSummary(d, selK = -1) {
     ${['hit', 'near', 'unknown'].map(v => `<span class="pill" style="border:1px solid ${SYM_VERDICTS[v].color};color:${SYM_VERDICTS[v].color}">${SYM_VERDICTS[v].name} ${cnt[v]}</span>`).join('')}
     <span class="small muted">器具は寸法、机・椅子は線の形から判定しています。行を押すと図面のその場所へ飛びます。色は図面の「符」ボタンで消せます</span></div>
     <div style="margin-top:8px;display:grid;gap:6px;max-height:320px;overflow:auto">${rows}${S.length > 150 ? `<div class="small muted">ほか ${S.length - 150} 件（先頭150件だけ出しています）</div>` : ''}</div>${mineHtml}`;
+}
+
+/* 部屋の見分け（現段階）：今の読み取り・解析が持っている根拠で区画を色分けする（表示だけ。部屋・見積は変えない） */
+const rjCache = new WeakMap();
+function roomJudge(d) {
+  if (!d || !d.plan || !d.plan.faces) return null;
+  const c = rjCache.get(d);
+  if (c && c.faces === d.plan.faces && c.analysis === d.analysis && c.fixtures === d.fixtures && c.doors === d.doors) return c.r;
+  const A = d.analysis || {};
+  const r = judgeRooms(d.plan.faces, { marks: A.marks || {}, names: A.names || {}, fixtures: d.fixtures || [], doors: d.doors || [] });
+  rjCache.set(d, { faces: d.plan.faces, analysis: d.analysis, fixtures: d.fixtures, doors: d.doors, r });
+  return r;
+}
+function roomJudgeEntries(d) {
+  const r = roomJudge(d); if (!r) return [];
+  const style = { room: { op: 0.06, so: 0.95 }, hold: { op: 0.05, so: 0.9, dash: true }, out: { op: 0.10, so: 0.7 }, unknown: { op: 0, so: 0.35 } };
+  return (d.plan.faces || []).filter(f => f && f.poly && r.map[f.i]).map(f => ({ poly: f.poly, color: ROOM_JUDGE[r.map[f.i]].color, ...(style[r.map[f.i]] || {}) }));
+}
+function roomSummary(d) {
+  const r = roomJudge(d); if (!r || !r.counts.total) return '';
+  const c = r.counts;
+  return `<div class="row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)"><b class="small">部屋の見分け（現段階）</b>
+    ${['room', 'hold', 'out', 'unknown'].map(k => `<span class="pill" style="border:1px solid ${ROOM_JUDGE[k].color};color:${ROOM_JUDGE[k].color}">${ROOM_JUDGE[k].name} ${c[k]}</span>`).join('')}
+    <span class="small muted">全 ${c.total} 区画。緑は名前・器具・ドアの根拠がある区画です。色は図面の「室」ボタンで消せます。部屋・見積には影響しません</span></div>`;
 }
 
 function fixSummary(d) {
@@ -821,6 +846,7 @@ function stepRooms(ctx) {
     const demoBox = body.querySelector('#dwgDemo'); if (demoBox) demoBox.innerHTML = demoList();
     const fxBox = body.querySelector('#dwgFix'); if (fxBox) fxBox.innerHTML = fixSummary(p.drawing);
     const symBox = body.querySelector('#dwgSym'); if (symBox) symBox.innerHTML = symSummary(p.drawing, symSel);
+    const roomBox = body.querySelector('#dwgRoom'); if (roomBox) roomBox.innerHTML = roomSummary(p.drawing);
     if (mode !== 'room') {
       const bar = body.querySelector('#dwgBar');
       if (mode === 'wall') {
@@ -1080,7 +1106,7 @@ function stepRooms(ctx) {
     if (p.drawing && p.drawing.plan) {
       view = planView(body.querySelector('#dwgView'), p.drawing.plan, {
         keep: keepV,
-        selected: () => sel, owner, fixtures: fxList, symbols: () => symList(p.drawing).map(s => ({ b: s.b, color: SYM_VERDICTS[s.verdict].color, label: s.verdict === 'hit' ? s.category : s.verdict === 'near' ? '類似' : '不明', on: s.k === symSel })), bg: p.drawing.bg && p.sketch && p.sketch.img ? { ...p.sketch.img, s: p.drawing.bg.s } : null, fixSel: () => (mode === 'fix' ? fsel : -1), mode: () => mode, fixG: p.drawing.fixG || '', fixGd: p.drawing.fixGd || '',
+        selected: () => sel, owner, fixtures: fxList, symbols: () => symList(p.drawing).map(s => ({ b: s.b, color: SYM_VERDICTS[s.verdict].color, label: s.verdict === 'hit' ? s.category : s.verdict === 'near' ? '類似' : '不明', on: s.k === symSel })), roomJudge: () => roomJudgeEntries(p.drawing), bg: p.drawing.bg && p.sketch && p.sketch.img ? { ...p.sketch.img, s: p.drawing.bg.s } : null, fixSel: () => (mode === 'fix' ? fsel : -1), mode: () => mode, fixG: p.drawing.fixG || '', fixGd: p.drawing.fixGd || '',
         extraTools: `<button class="iconbtn" data-act="dwgFs" title="${dwgFs ? '全画面をやめる' : '全画面で編集する'}" aria-label="${dwgFs ? '全画面をやめる' : '全画面で編集する'}">${icon(dwgFs ? 'shrink' : 'full')}</button>`,
         marks: () => faceMarks(),
         /* 部屋にした区画は、区画ごとの番号を消して、部屋に1つだけ名前と広さを出す（かつ「まとめたら細かい区画の数字消して真ん中にまとめた数字に」） */

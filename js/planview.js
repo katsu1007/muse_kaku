@@ -41,6 +41,7 @@ const bgOn = () => { try { return localStorage.getItem('kaku-bg') !== '0'; } cat
 const gridOn = () => { try { return localStorage.getItem('kaku-grid') === '1'; } catch (e) { return false; } };
 const txtOn = () => { try { return localStorage.getItem('kaku-dtext') !== '0'; } catch (e) { return true; } };   // 図面の文字（最初は出す）
 const symOn = () => { try { return localStorage.getItem('muse-sym') !== '0'; } catch (e) { return true; } };   // シンボルの色（最初は出す）
+const rjOn = () => { try { return localStorage.getItem('muse-rjudge') !== '0'; } catch (e) { return true; } };   // 部屋の見分けの色（最初は出す）
 
 /* シンボルの色の印：判定の色で塗り＋枠＋名前。選んだ物（on）は枠を太くして目立たせる */
 function symMark(s, lw) {
@@ -83,12 +84,13 @@ export function planView(box, plan, opt = {}) {
       ${opt.fixGd ? `<path d="${opt.fixGd}" transform="scale(0.001,0.001)" fill="none" stroke="var(--faint)" stroke-width="1" vector-effect="non-scaling-stroke" stroke-dasharray="4 3" pointer-events="none"/>` : ''}
       <g class="fixes" pointer-events="none"></g>
       <g class="syms" pointer-events="none" ${symOn() ? '' : 'display="none"'}></g>
+      <g class="rjudge" pointer-events="none" ${rjOn() ? '' : 'display="none"'}></g>
       <g class="overlay" pointer-events="none"></g>
       <g class="dtexts" pointer-events="none" fill="var(--text)" opacity=".8" ${txtOn() ? '' : 'display="none"'}></g>
       <g class="labels" font-size="${fs}" text-anchor="middle"></g></g></svg>
     <div class="pv-note" hidden>拡大すると、区画の番号が出ます</div>
     <div class="pv-loupe" hidden><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"><use href="#${gid}"/><g class="lp-mark"></g></svg></div>
-    <div class="pv-tools">${opt.extraTools || ''}${opt.bg ? `<button class="iconbtn pv-gridbtn ${bgOn() ? 'on' : ''}" data-z="bg" aria-pressed="${bgOn()}" title="下に敷いた図を出す・隠す">図</button>` : ''}${(plan.gsegs || []).length ? `<button class="iconbtn pv-gridbtn ${gridOn() ? 'on' : ''}" data-z="grid" aria-pressed="${gridOn()}" title="通り芯を出す・隠す">芯</button>` : ''}${opt.dtexts ? `<button class="iconbtn pv-gridbtn ${txtOn() ? 'on' : ''}" data-z="txt" aria-pressed="${txtOn()}" title="図面の文字を出す・隠す">字</button>` : ''}${opt.symbols ? `<button class="iconbtn pv-gridbtn ${symOn() ? 'on' : ''}" data-z="sym" aria-pressed="${symOn()}" title="シンボルの色を出す・隠す">符</button>` : ''}<button class="iconbtn" data-z="in" aria-label="拡大">＋</button><button class="iconbtn" data-z="out" aria-label="縮小">－</button><button class="iconbtn" data-z="fit" aria-label="全体を表示">⤢</button></div></div>`;
+    <div class="pv-tools">${opt.extraTools || ''}${opt.bg ? `<button class="iconbtn pv-gridbtn ${bgOn() ? 'on' : ''}" data-z="bg" aria-pressed="${bgOn()}" title="下に敷いた図を出す・隠す">図</button>` : ''}${(plan.gsegs || []).length ? `<button class="iconbtn pv-gridbtn ${gridOn() ? 'on' : ''}" data-z="grid" aria-pressed="${gridOn()}" title="通り芯を出す・隠す">芯</button>` : ''}${opt.dtexts ? `<button class="iconbtn pv-gridbtn ${txtOn() ? 'on' : ''}" data-z="txt" aria-pressed="${txtOn()}" title="図面の文字を出す・隠す">字</button>` : ''}${opt.symbols ? `<button class="iconbtn pv-gridbtn ${symOn() ? 'on' : ''}" data-z="sym" aria-pressed="${symOn()}" title="シンボルの色を出す・隠す">符</button>` : ''}${opt.roomJudge ? `<button class="iconbtn pv-gridbtn ${rjOn() ? 'on' : ''}" data-z="rj" aria-pressed="${rjOn()}" title="部屋の見分けの色を出す・隠す">室</button>` : ''}<button class="iconbtn" data-z="in" aria-label="拡大">＋</button><button class="iconbtn" data-z="out" aria-label="縮小">－</button><button class="iconbtn" data-z="fit" aria-label="全体を表示">⤢</button></div></div>`;
   const svg = box.querySelector('svg');
   /* 区画の番号の字：区画の大きさに合わせた大きさにして、画面で小さすぎて読めない字（7px 未満）は出さない。
    * 区画が何百もある図面で、字が重なって図が見えなくなるため。拡大すると、その大きさで読める区画から順に出る */
@@ -120,6 +122,8 @@ export function planView(box, plan, opt = {}) {
     const fsel = opt.fixSel ? opt.fixSel() : -1;
     svg.querySelector('.fixes').innerHTML = (opt.fixtures ? opt.fixtures() : []).map((x, k) => x.t === 'other' && k !== fsel ? '' : fixBox(x, lw, k === fsel)).join('');
     svg.querySelector('.syms').innerHTML = (opt.symbols ? opt.symbols() : []).map(s => symMark(s, lw)).join('');
+    const rjg = svg.querySelector('.rjudge');
+    if (rjg) rjg.innerHTML = (opt.roomJudge ? opt.roomJudge() : []).map(e => `<polygon points="${e.poly.map(p => p[0] + ',' + -p[1]).join(' ')}" fill="${e.color}" fill-opacity="${e.op || 0}" stroke="${e.color}" stroke-opacity="${e.so != null ? e.so : 0.9}" stroke-width="${lw * 2}" ${e.dash ? `stroke-dasharray="${lw * 6} ${lw * 4}"` : ''}/>`).join('');
     const sel = opt.selected ? opt.selected() : new Set();
     const byI = new Map(plan.faces.map(f => [f.i, f]));
     const RL = opt.rooms ? opt.rooms() : [], roomOf = new Map(); RL.forEach((r, k) => r.faces.forEach(i => roomOf.set(i, k)));
@@ -284,6 +288,9 @@ export function planView(box, plan, opt = {}) {
     const r = svg.getBoundingClientRect();
     if (z.dataset.z === 'sym') { const on = !symOn(); try { localStorage.setItem('muse-sym', on ? '1' : '0'); } catch (e2) { /* 覚えられなくても切り替える */ }
       const g = svg.querySelector('.syms'); if (g) { if (on) g.removeAttribute('display'); else g.setAttribute('display', 'none'); }
+      z.classList.toggle('on', on); z.setAttribute('aria-pressed', on); return; }
+    if (z.dataset.z === 'rj') { const on = !rjOn(); try { localStorage.setItem('muse-rjudge', on ? '1' : '0'); } catch (e2) { /* 覚えられなくても切り替える */ }
+      const g = svg.querySelector('.rjudge'); if (g) { if (on) g.removeAttribute('display'); else g.setAttribute('display', 'none'); }
       z.classList.toggle('on', on); z.setAttribute('aria-pressed', on); return; }
     if (z.dataset.z === 'txt') { const on = !txtOn(); try { localStorage.setItem('kaku-dtext', on ? '1' : '0'); } catch (e2) { /* 覚えられなくても切り替える */ }
       const g = svg.querySelector('.dtexts'); if (g) { if (on) g.removeAttribute('display'); else g.setAttribute('display', 'none'); }
