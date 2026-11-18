@@ -127,9 +127,10 @@ export function planView(box, plan, opt = {}) {
     const rjg = svg.querySelector('.rjudge');
     if (rjg) rjg.innerHTML = (opt.roomJudge ? opt.roomJudge() : []).map(e => `<polygon points="${e.poly.map(p => p[0] + ',' + -p[1]).join(' ')}" fill="${e.color}" fill-opacity="${e.op || 0}" stroke="${e.color}" stroke-opacity="${e.so != null ? e.so : 0.9}" stroke-width="${lw * 2}" ${e.dash ? `stroke-dasharray="${lw * 6} ${lw * 4}"` : ''}/>`).join('');
     const zng = svg.querySelector('.zones');
-    if (zng) zng.innerHTML = (opt.zones ? opt.zones() : []).map(e => e.poly
-      ? `<polygon points="${e.poly.map(p => p[0] + ',' + -p[1]).join(' ')}" fill="${e.color}" fill-opacity="${e.op != null ? e.op : 0.16}"/>`
-      : `<text x="${e.lx}" y="${-e.ly}" font-size="${lw * 15}" text-anchor="middle" dominant-baseline="central" fill="${e.color}" font-weight="700" stroke="var(--bg)" stroke-width="${lw * 2.7}" paint-order="stroke">${E2(e.label)}</text>`).join('');
+    if (zng) { const ZE = v => String(v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+      zng.innerHTML = (opt.zones ? opt.zones() : []).map(e => e.poly
+        ? `<polygon points="${e.poly.map(p => p[0] + ',' + -p[1]).join(' ')}" fill="${e.color}" fill-opacity="${e.op != null ? e.op : 0.16}"/>`
+        : `<text x="${e.lx}" y="${-e.ly}" font-size="${lw * 15}" text-anchor="middle" dominant-baseline="central" fill="${e.color}" font-weight="700" stroke="var(--bg)" stroke-width="${lw * 2.7}" paint-order="stroke">${ZE(e.label)}</text>`).join(''); }
     const sel = opt.selected ? opt.selected() : new Set();
     const byI = new Map(plan.faces.map(f => [f.i, f]));
     const RL = opt.rooms ? opt.rooms() : [], roomOf = new Map(); RL.forEach((r, k) => r.faces.forEach(i => roomOf.set(i, k)));
