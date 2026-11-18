@@ -1,0 +1,91 @@
+/* DXF の寸法（DIMENSION）を別に拾う部品のテスト。エンジンは寸法を素通りするので、
+ * 実測値（42）・定義点からの計算・表示文字・拾う範囲（ENTITIES だけ）を確かめる */
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { extractDxfDims } from '../js/dxf-dims.js';
+
+/* コードと値の組から DXF 文字列を作る */
+const build = pairs => pairs.map(([c, v]) => `${c}\n${v}`).join('\n') + '\n';
+const header = (units = 4) => [[0, 'SECTION'], [2, 'HEADER'], [9, '$INSUNITS'], [70, units], [0, 'ENDSEC']];
+const section = (name, ents) => [[0, 'SECTION'], [2, name], ...ents.flat(), [0, 'ENDSEC']];
+const dim = g => [[0, 'DIMENSION'], ...Object.entries(g).map(([c, v]) => [+c, v])];
+const dxfOf = (ents, units) => build([...header(units), ...section('ENTITIES', ents), [0, 'EOF']]);
+
+/* 線形寸法の基本形：定義点・原点2つ・文字位置 */
+const LINEAR = { 2: '*D1', 10: 500, 20: 600, 11: 123.4, 21: 567.8, 70: 32, 1: '', 13: 0, 23: 0, 14: 3000, 24: 0, 50: 0 };
+
+test('実測値（42）があればそれを使い、表示文字の上書きと文字位置を返す', () => {
+  const dims = extractDxfDims(dxfOf([dim({ ...LINEAR, 42: 1500.5, 1: '1500' })]));
+  assert.equal(dims.length, 1);
+  assert.deepEqual(dims[0], { type: 'linear', value: 1500.5, text: '1500', x: 123.4, y: 567.8 });
+});
+
+test('42 が -1（未記録）なら定義点から求める：寸法線方向への射影', () => {
+  const dims = extractDxfDims(dxfOf([dim({ ...LINEAR, 42: -1 })]));
+  assert.equal(dims[0].value, 3000); /* 原点 (0,0)→(3000,0)、角度 0 */
+  assert.equal(dims[0].text, '3000'); /* 上書きが無ければ実測値から作る */
+});
+
+test('42 が無くても定義点から求める：角度 90 の線形寸法', () => {
+  const dims = extractDxfDims(dxfOf([dim({ ...LINEAR, 14: 0, 24: 2500, 50: 90 })]));
+  assert.equal(dims[0].value, 2500);
+});
+
+test('平行寸法は2原点の距離', () => {
+  const dims = extractDxfDims(dxfOf([dim({ ...LINEAR, 70: 33, 14: 3000, 24: 4000 })]));
+  assert.equal(dims[0].type, 'aligned');
+  assert.equal(dims[0].value, 5000);
+});
+
+test('半径は中心→定義点、直径はその2倍。表示文字に R / ⌀ が付く', () => {
+  const base = { 10: 1000, 20: 1000, 11: 1300, 21: 1100, 1: '', 15: 1600, 25: 1000 };
+  const r = extractDxfDims(dxfOf([dim({ ...base, 70: 36 })]));
+  assert.equal(r[0].type, 'radius');
+  assert.equal(r[0].value, 600);
+  assert.equal(r[0].text, 'R600');
+  const d = extractDxfDims(dxfOf([dim({ ...base, 70: 35 })]));
+  assert.equal(d[0].type, 'diameter');
+  assert.equal(d[0].value, 1200);
+  assert.equal(d[0].text, '⌀1200');
+});
+
+test('角度寸法の 42 は度そのまま（単位換算しない）', () => {
+  const dims = extractDxfDims(dxfOf([dim({ ...LINEAR, 70: 34, 42: 45.25 })]));
+  assert.equal(dims[0].type, 'angular');
+  assert.equal(dims[0].value, 45.25);
+  assert.equal(dims[0].text, '45.25°');
+});
+
+test('単位が cm（$INSUNITS=5）なら mm に換算する', () => {
+  const dims = extractDxfDims(dxfOf([dim({ ...LINEAR, 42: 150.05, 1: '' })], 5));
+  assert.equal(dims[0].value, 1500.5);
+});
+
+test('ブロック定義の中の寸法は拾わない（ENTITIES の寸法だけ）', () => {
+  const text = build([
+    ...header(),
+    ...section('BLOCKS', [[[0, 'BLOCK'], [2, '*D9']], dim({ ...LINEAR, 42: 999 }), [[0, 'ENDBLK']]]),
+    ...section('ENTITIES', [dim({ ...LINEAR, 42: 100 })]),
+    [0, 'EOF'],
+  ]);
+  const dims = extractDxfDims(text);
+  assert.equal(dims.length, 1);
+  assert.equal(dims[0].value, 100);
+});
+
+test('表示文字の <> は実測値に置き換わる', () => {
+  const dims = extractDxfDims(dxfOf([dim({ ...LINEAR, 42: 800, 1: '約<>mm' })]));
+  assert.equal(dims[0].text, '約800mm');
+});
+
+test('ArrayBuffer でも文字列でも同じ結果（バイト列は UTF-8→Shift_JIS の順で読む）', () => {
+  const s = dxfOf([dim({ ...LINEAR, 42: 1500.5, 1: '1500' })]);
+  const buf = new TextEncoder().encode(s);
+  const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  assert.deepEqual(extractDxfDims(ab), extractDxfDims(s));
+});
+
+test('寸法が無い・読めない入力は []', () => {
+  assert.deepEqual(extractDxfDims(''), []);
+  assert.deepEqual(extractDxfDims(dxfOf([[[0, 'LINE'], [10, 0], [20, 0], [11, 100], [21, 100]]])), []);
+});

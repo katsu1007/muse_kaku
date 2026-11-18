@@ -14,6 +14,7 @@ import { classifyBox, classifyCluster, SYM_VERDICTS, SYM_DICT } from './symdict.
 import { detectFurniture } from './furndetect.js';
 import { judgeRooms, ROOM_JUDGE } from './roomjudge.js';
 import { computeZones, splitFacesByLine } from './zones.js';
+import { extractDxfDims } from './dxf-dims.js';
 import { USES, DEF_LM, needCount, pitchFor, luxOf, wirePlan, cableQty, pip, polyD } from './lighting.js';
 /* iPhone・iPad では、選べるファイルの種類を絞ると .jww・.jwc・.dxf が灰色になって選べない（iPhone がこの拡張子を知らないため）。
    なので iPhone・iPad では絞らない。何を選んでも、読み込む時に拡張子で見分けるので困らない */
@@ -272,7 +273,7 @@ function drawingCard(p) {
     ${oldReadRow(d)}${sheetRow(d)}<div id="dwgView"></div>${sheetNotes(d)}${titleRow(p)}
     <div class="addbar" style="margin-top:10px" id="dwgBar"></div></div>
     <div id="dwgDemo"></div>
-    <div id="dwgFix">${fixSummary(d)}</div><div id="dwgSym">${symSummary(d)}</div><div id="dwgRoom">${roomSummary(d)}</div><div id="dwgZone">${zoneSummary(d)}</div>${elecRow(p)}
+    <div id="dwgFix">${fixSummary(d)}</div><div id="dwgSym">${symSummary(d)}</div><div id="dwgRoom">${roomSummary(d)}</div><div id="dwgZone">${zoneSummary(d)}</div><div id="dwgDim">${dimSummary(d)}</div>${elecRow(p)}
     <details class="more"><summary>区画の一覧から選ぶ（図面で押しにくい小さい区画など）</summary><div class="facelist" id="dwgFaces"></div></details>
     ${r2row(d)}
     <div class="small muted" id="dwgStatus" style="margin-top:6px"></div></div>`;
@@ -502,6 +503,19 @@ function zoneSummary(d, selId = '') {
     return h;
   }).join('');
   return `<div class="card" style="margin-top:10px"><div class="row"><b>ゾーン分け（部屋の候補）</b><span class="muted small">${Z.length}件</span><span class="spacer"></span><button class="btn sm ghost" data-zmake="1">分け直す</button></div><div class="small muted" style="margin:4px 0 6px">自動で分けた下書きです。面積は目安です。違う所は、ゾーンを選んで「線で分ける」「合体」で直せます。手直ししたゾーンは、分け直しても残ります。</div>${rows}</div>`;
+}
+
+/* 図面の寸法（DXF から別に拾った物。エンジンは寸法を拾わないので、読み込みの時に
+ * js/dxf-dims.js で抜いて d.dims に覚えている。表示だけで、区画・部屋・見積には使わない。
+ * 古い保存には dims が無いので、その時は出さない） */
+function dimSummary(d) {
+  const dims = (d && d.dims) || [];
+  if (!dims.length) return '';
+  const chips = dims.slice(0, 60).map(x => `<span class="pill">${esc(x.text)}</span>`).join('');
+  return `<div class="row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)"><b class="small">寸法</b>
+    <span class="pill info">${dims.length}件</span>
+    <span class="small muted">図面に書かれていた寸法です（mm）。見積には入りません</span></div>
+    <div class="row" style="gap:6px;margin-top:8px">${chips}${dims.length > 60 ? `<span class="small muted">ほか ${dims.length - 60} 件</span>` : ''}</div>`;
 }
 
 /* ゾーンの名前を付ける・直す */
@@ -902,6 +916,7 @@ function stepRooms(ctx) {
     const symBox = body.querySelector('#dwgSym'); if (symBox) symBox.innerHTML = symSummary(p.drawing, symSel);
     const roomBox = body.querySelector('#dwgRoom'); if (roomBox) roomBox.innerHTML = roomSummary(p.drawing);
     const zoneBox = body.querySelector('#dwgZone'); if (zoneBox) zoneBox.innerHTML = zoneSummary(p.drawing, zoneSel);
+    const dimBox = body.querySelector('#dwgDim'); if (dimBox) dimBox.innerHTML = dimSummary(p.drawing);
     if (mode !== 'room') {
       const bar = body.querySelector('#dwgBar');
       if (mode === 'wall') {
@@ -1325,8 +1340,11 @@ function stepRooms(ctx) {
           const img = !cad && files.find(f => /\.(pdf|png|jpe?g|heic|webp|gif)$/i.test(f.name) || /^image\/|pdf/.test(f.type));
           if (img && await ask('区画が見つかりませんでした', 'この図を下に敷いて、部屋の角をなぞって拾いますか？（写真・スキャンのPDFは、なぞって拾えます）', { ok: 'なぞって拾う' })) { openSk(img); return; }
           toast(msg, { bad: true }); return; }
+        /* DXF の寸法はエンジンが拾わないので、同じファイルから別に抜いて覚える（表示だけ。区画・器具・見積には使わない）。JWW は寸法が線と文字で出るので空のまま */
+        let dims = [];
+        if (cad && /\.dxf$/i.test(cad.name)) { try { dims = extractDxfDims(await cad.arrayBuffer()); } catch (e2) { console.warn('寸法の読み取りに失敗', e2); } }
         p.rooms.forEach(r => { if (r.src === 'plan') { r.src = 'plan-old'; delete r.faces; } });
-        p.drawing = { fileName: (cad ? [cad] : files).map(f => f.name).join('、'), at: Date.now(), plan: res.plan, fixtures: cad ? res.fixtures : null, open: cad ? res.open : null, doors: cad ? (res.doorList || []) : [], fixG: cad ? res.fixG : '', fixGd: cad ? res.fixGd : '' };
+        p.drawing = { fileName: (cad ? [cad] : files).map(f => f.name).join('、'), at: Date.now(), plan: res.plan, fixtures: cad ? res.fixtures : null, open: cad ? res.open : null, doors: cad ? (res.doorList || []) : [], fixG: cad ? res.fixG : '', fixGd: cad ? res.fixGd : '', dims };
         /* 机・椅子などの家具：線の集まりから形の候補を切り出して覚える（判定はシンボル辞書。器具・見積の数字は変えない） */
         if (cad) { try { p.drawing.furn = detectFurniture(res.plan.segs || [], res.fixtures || [], res.doorList || []); } catch (e2) { console.warn('家具の検出に失敗', e2); p.drawing.furn = []; } }
         /* 新しい読み取り（js/reader2）：図枠・表の印を作って覚えておく。今の読み取りの結果（区画・器具）は変えない。画面に出すのは「新しい読み取り」を選んだ時だけ */
