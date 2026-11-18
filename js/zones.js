@@ -203,6 +203,7 @@ export function computeZones({ segs = [], faces = [], texts = [], doors = [] } =
    * （中心だけだと、入れ子の大きい区画や家具の輪の区画を取りこぼすため）。
    * 200㎡を超える大枠の区画（図全体の輪など）は、どのゾーンにも入れない */
   const pip = (x, y, P) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const a = P[i], b = P[j]; if ((a[1] > y) !== (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]) c = !c; } return c; };
+  const faceZone = new Map();
   for (const f of F) {
     if (f.area != null && f.area > 200) continue;
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
@@ -217,13 +218,33 @@ export function computeZones({ segs = [], faces = [], texts = [], doors = [] } =
       }
     if (!cnt.size) continue;
     const best = [...cnt.entries()].sort((a, b) => b[1] - a[1])[0][0];
-    if (zones[best]) zones[best].faces.push(f.i);
+    if (zones[best]) { zones[best].faces.push(f.i); faceZone.set(f.i, best); }
+  }
+  /* 6.5) 残った小区画の吸収：小さい成分（2㎡未満）に落ちてゾーンに入れなかった
+   * 小区画は、近く（2.5m以内）の割当済み区画のゾーンへ寄せる。机まわりの
+   * ポケットやブースの断片が、周りの部屋の候補から漏れないようにするため。
+   * 吸収の起点は元の割当だけ（吸収した区画からは連鎖させない） */
+  const byI = new Map(F.map(f => [f.i, f]));
+  const anchors = [...faceZone.entries()];
+  for (const f of F) {
+    if (faceZone.has(f.i)) continue;
+    if (f.area != null && f.area > 10) continue;
+    let bz = -1, bd = 2.5;
+    for (const [ai, az] of anchors) {
+      const a = byI.get(ai); if (!a || a.cx == null) continue;
+      const d = Math.hypot(a.cx - f.cx, a.cy - f.cy);
+      if (d < bd) { bd = d; bz = az; }
+    }
+    if (bz >= 0 && zones[bz]) { zones[bz].faces.push(f.i); faceZone.set(f.i, bz); }
   }
   /* 区画が入らないゾーンは、広い開けた場所の目印としてだけ残す（20㎡以上）。
-   * 上限を超える時は、区画が入っているゾーン・名前のあるゾーンを優先して残す */
-  return zones.filter(z => z.faces.length || z.area >= 20)
-    .sort((a, b) => ((b.faces.length > 0) - (a.faces.length > 0)) || ((b.name !== '') - (a.name !== '')) || (b.area - a.area))
-    .slice(0, 60);
+   * 件数の上限（60）は区画なしゾーンにだけ効かせ、区画が入ったゾーンは
+   * 上限で切り捨てない（実図面では区画ありゾーンだけで60を超えるため） */
+  const withFaces = zones.filter(z => z.faces.length);
+  const noFaces = zones.filter(z => !z.faces.length && z.area >= 20)
+    .sort((a, b) => b.area - a.area).slice(0, Math.max(0, 60 - withFaces.length));
+  return [...withFaces, ...noFaces]
+    .sort((a, b) => ((b.faces.length > 0) - (a.faces.length > 0)) || ((b.name !== '') - (a.name !== '')) || (b.area - a.area));
 }
 
 /* 線でゾーンを分ける：区画の中心が線のどちら側にあるかで分ける。
