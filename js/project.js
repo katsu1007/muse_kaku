@@ -13,6 +13,7 @@ import { planView, roomColor } from './planview.js';
 import { classifyBox, classifyCluster, SYM_VERDICTS, SYM_DICT } from './symdict.js';
 import { detectFurniture } from './furndetect.js';
 import { judgeRooms, ROOM_JUDGE } from './roomjudge.js';
+import { computeZones, splitFacesByLine } from './zones.js';
 import { USES, DEF_LM, needCount, pitchFor, luxOf, wirePlan, cableQty, pip, polyD } from './lighting.js';
 /* iPhone・iPad では、選べるファイルの種類を絞ると .jww・.jwc・.dxf が灰色になって選べない（iPhone がこの拡張子を知らないため）。
    なので iPhone・iPad では絞らない。何を選んでも、読み込む時に拡張子で見分けるので困らない */
@@ -271,7 +272,7 @@ function drawingCard(p) {
     ${oldReadRow(d)}${sheetRow(d)}<div id="dwgView"></div>${sheetNotes(d)}${titleRow(p)}
     <div class="addbar" style="margin-top:10px" id="dwgBar"></div></div>
     <div id="dwgDemo"></div>
-    <div id="dwgFix">${fixSummary(d)}</div><div id="dwgSym">${symSummary(d)}</div><div id="dwgRoom">${roomSummary(d)}</div>${elecRow(p)}
+    <div id="dwgFix">${fixSummary(d)}</div><div id="dwgSym">${symSummary(d)}</div><div id="dwgRoom">${roomSummary(d)}</div><div id="dwgZone">${zoneSummary(d)}</div>${elecRow(p)}
     <details class="more"><summary>区画の一覧から選ぶ（図面で押しにくい小さい区画など）</summary><div class="facelist" id="dwgFaces"></div></details>
     ${r2row(d)}
     <div class="small muted" id="dwgStatus" style="margin-top:6px"></div></div>`;
@@ -466,6 +467,56 @@ function fixSummary(d) {
   return `<div class="row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)"><b class="small">図面の器具</b>
     ${Object.entries(c).map(([t, n]) => `<span class="pill ${t === 'unknown' ? 'warn' : t === 'other' ? '' : 'info'}">${esc(FIX_NAMES[t] || t)} ${n}</span>`).join('')}
     <span class="spacer"></span><button class="btn sm primary" data-act="fixLines">${icon('list')}器具を明細に入れる</button></div>`;
+}
+
+/* ゾーン分け（部屋の候補）：色はゾーンの並び順で決める */
+const ZONE_COLORS = ['#f2789f', '#f2a541', '#7bc950', '#4cc3d9', '#9b7bde', '#e5635c', '#5b8def', '#d9c84a', '#43b581', '#c86dd7', '#f08c4a', '#6fc7a5'];
+const zoneColor = k => ZONE_COLORS[k % ZONE_COLORS.length];
+
+/* 図面に出すゾーンの色塗り（区画の形をゾーンの色で薄く塗る＋名前）。選んだゾーンは濃くする */
+function zoneEntries(d, selId = '') {
+  const Z = (d && d.zones) || [];
+  if (!Z.length || !d.plan) return [];
+  const byI = new Map(d.plan.faces.map(f => [f.i, f]));
+  const out = [];
+  Z.forEach((z, k) => {
+    const color = zoneColor(k);
+    z.faces.forEach(i => { const f = byI.get(i); if (f) out.push({ poly: f.poly, color, op: z.id === selId ? 0.34 : 0.15 }); });
+    if (z.name) out.push({ label: z.name, lx: z.x, ly: z.y, color });
+  });
+  return out;
+}
+
+/* ゾーンの一覧：選ぶと、部屋にする・線で分ける・名前・合体・消すが出る */
+function zoneSummary(d, selId = '') {
+  if (!d || !d.plan) return '';
+  const Z = d.zones;
+  if (!Z) return `<div class="card" style="margin-top:10px"><div class="row"><b>ゾーン分け</b><span class="spacer"></span><button class="btn sm" data-zmake="1">ゾーン分けする</button></div><div class="small muted" style="margin-top:4px">開けた場所を、部屋の候補の範囲に分けます（壁で囲まれた部屋は、今の区画のままで大丈夫です）。</div></div>`;
+  if (!Z.length) return '';
+  const rows = Z.map((z, k) => {
+    const sel = z.id === selId;
+    let h = `<div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn sm" data-zsel="${z.id}" style="justify-content:flex-start;gap:8px;min-height:40px;flex:1;text-align:left${sel ? ';border-color:var(--accent);background:rgba(255,138,61,.10)' : ''}"><span style="width:12px;height:12px;border-radius:3px;background:${zoneColor(k)};flex:none"></span><b>${esc(z.name || '名前なし')}</b><span class="muted">約${z.area}㎡・区画${z.faces.length}件</span>${z.fixed ? '<span class="muted">（手直し済み）</span>' : ''}</button>`;
+    if (selId && !sel) h += `<button class="btn sm" data-zmerge="${z.id}" style="min-height:40px;flex:none" title="選んでいるゾーンと合体します">合体</button>`;
+    h += '</div>';
+    if (sel) h += `<div class="row" style="gap:6px;margin:2px 0 8px;flex-wrap:wrap"><button class="btn sm primary" data-zroom="${z.id}" ${z.faces.length ? '' : 'disabled'}>この範囲を部屋にする</button><button class="btn sm" data-zsplit="${z.id}" ${z.faces.length ? '' : 'disabled'}>線で分ける</button><button class="btn sm" data-zname="${z.id}">名前を付ける</button><button class="btn sm ghost danger" data-zdel="${z.id}">消す</button></div>`;
+    return h;
+  }).join('');
+  return `<div class="card" style="margin-top:10px"><div class="row"><b>ゾーン分け（部屋の候補）</b><span class="muted small">${Z.length}件</span><span class="spacer"></span><button class="btn sm ghost" data-zmake="1">分け直す</button></div><div class="small muted" style="margin:4px 0 6px">自動で分けた下書きです。面積は目安です。違う所は、ゾーンを選んで「線で分ける」「合体」で直せます。手直ししたゾーンは、分け直しても残ります。</div>${rows}</div>`;
+}
+
+/* ゾーンの名前を付ける・直す */
+function openZoneEditor(zone, onDone) {
+  const m = modal({ title: 'ゾーンの名前', body: `
+    <p class="small muted" style="margin-top:0">この範囲の名前です。部屋にする時は、この名前が部屋の名前になります。</p>
+    <label class="f">名前<input class="in" id="zoneName" type="text" value="${esc(zone.name || '')}" placeholder="例：事務室"></label>`,
+    foot: `<button class="btn" data-close>やめる</button><button class="btn primary" data-save>決める</button>` });
+  const input = m.el.querySelector('#zoneName');
+  m.el.querySelector('[data-save]').onclick = () => {
+    zone.name = input.value.trim();
+    zone.fixed = true;
+    m.close(); onDone && onDone();
+  };
+  setTimeout(() => { try { input.focus(); } catch (e) { /* そのまま */ } }, 60);
 }
 
 function fixLinesDialog(p, after) {
@@ -665,6 +716,8 @@ function stepRooms(ctx) {
   const sel = new Set();
   let view = null;
   let mode = 'room', fsel = -1, symSel = -1, addAt = null, cutA = null, ltool = 'light', linkSel = null;
+  let zoneSel = '', zsplit = null;   // ゾーン分け：選んでいるゾーン／線で分ける途中（{id, pts}）
+  let zoneNameOnce = '';   // ゾーンから部屋を作る時、そのゾーンの名前を部屋の名前にする
   let holesOn = true, selGeoKey = '', selGeo = null;   // 選んでいる区画の中の「囲まれた所」を床に入れるか（部屋にする前に決める）
   let sheetZoom = '';   // 大きく出している図（図枠・段の位置のキー）。'' は全体
   const lset = state.lightSet || (state.lightSet = { room: 'all', use: '', item: 'e-dl100', lm: 800 });
@@ -785,6 +838,7 @@ function stepRooms(ctx) {
     if (mode === 'wall' && wpts.length) { h += `<polyline points="${wpts.map(q => `${q[0]},${-q[1]}`).join(' ')}" fill="none" stroke="var(--accent)" stroke-width="${lw * 7}" stroke-linecap="round" stroke-linejoin="round"/>`; wpts.forEach(q => { h += `<circle cx="${q[0]}" cy="${-q[1]}" r="${lw * 6}" fill="var(--accent)"/>`; }); }
     (d.hatsu || []).forEach(x => { if (!x.rect) return; const [a, b, c, e] = x.rect; h += `<rect x="${a}" y="${-e}" width="${c - a}" height="${e - b}" fill="#ff8a3d" fill-opacity=".18" stroke="#ff8a3d" stroke-width="${lw * 3}" stroke-dasharray="${lw * 6} ${lw * 4}"/>`; });
     if (cutA) h += `<circle cx="${cutA[0]}" cy="${-cutA[1]}" r="${lw * 6}" fill="var(--accent)"/>`;
+    if (zsplit && zsplit.pts.length) { h += `<polyline points="${zsplit.pts.map(q => `${q[0]},${-q[1]}`).join(' ')}" fill="none" stroke="var(--accent)" stroke-width="${lw * 7}" stroke-linecap="round" stroke-linejoin="round"/>`; zsplit.pts.forEach(q => { h += `<circle cx="${q[0]}" cy="${-q[1]}" r="${lw * 6}" fill="var(--accent)"/>`; }); }
     if ((d.lights || []).length || panelsOf(d).length || (d.outlets || []).length || (d.switches || []).length) {
       const W = lightWires(p);
       const pd = pts => 'M' + pts.map(q => `${q[0]} ${-q[1]}`).join('L');
@@ -847,6 +901,7 @@ function stepRooms(ctx) {
     const fxBox = body.querySelector('#dwgFix'); if (fxBox) fxBox.innerHTML = fixSummary(p.drawing);
     const symBox = body.querySelector('#dwgSym'); if (symBox) symBox.innerHTML = symSummary(p.drawing, symSel);
     const roomBox = body.querySelector('#dwgRoom'); if (roomBox) roomBox.innerHTML = roomSummary(p.drawing);
+    const zoneBox = body.querySelector('#dwgZone'); if (zoneBox) zoneBox.innerHTML = zoneSummary(p.drawing, zoneSel);
     if (mode !== 'room') {
       const bar = body.querySelector('#dwgBar');
       if (mode === 'wall') {
@@ -927,6 +982,11 @@ function stepRooms(ctx) {
       }
       if (mode === 'cut') {
         bar.innerHTML = `<span class="small muted">${cutA ? 'もう1つの角をタップしてください。' : 'カッターで切る範囲の、四角の角を2か所タップしてください。'}</span>${cutA ? '<button class="btn sm ghost" data-act="cutCancel">やめる</button>' : ''}`;
+        return;
+      }
+      if (mode === 'zsplit') {
+        const z = ((p.drawing.zones || []).find(q => q.id === (zsplit && zsplit.id))) || {};
+        bar.innerHTML = `<span class="small muted">「${esc(z.name || '名前なし')}」を分ける線を引きます。境目にしたい所を順番にタップしてください${zsplit && zsplit.pts.length ? `（${zsplit.pts.length}点）` : ''}。線の両側で区画が分かれます。</span><span class="spacer"></span><button class="btn primary" data-act="zsplitGo" ${!zsplit || zsplit.pts.length < 2 ? 'disabled' : ''}>ここで分ける</button>${zsplit && zsplit.pts.length ? '<button class="btn sm" data-act="zsplitUndo">1つ戻す</button>' : ''}<button class="btn sm ghost" data-act="zsplitCancel">やめる</button>`;
         return;
       }
       if (mode === 'meas') {
@@ -1052,6 +1112,7 @@ function stepRooms(ctx) {
   } });
   const makeRooms = each => {
     const plan = p.drawing.plan;
+    const zn = zoneNameOnce; zoneNameOnce = '';
     const ids = [...sel];
     /* 選んだ区画が別の部屋に入っていたら、その部屋から外す */
     p.rooms.forEach(r => {
@@ -1076,7 +1137,7 @@ function stepRooms(ctx) {
       const names = [...new Set(F.map(f => f.name || r2n[f.i] || r2n[String(f.i)]).filter(Boolean))];
       const chs = F.map(f => +f.ch || 0).filter(v => v > 0);
       const runs = p.drawing.open ? roomOpenRuns(g, plan, p.drawing.open) : [];
-      p.rooms.push({ id: uid('r'), name: names.join('・') || `区画 ${F.map(f => f.no).join('・')}`, shape: 'free', area: geo.area, perim: geo.perim,
+      p.rooms.push({ id: uid('r'), name: zn || names.join('・') || `区画 ${F.map(f => f.no).join('・')}`, shape: 'free', area: geo.area, perim: geo.perim,
         h: chs.length ? Math.max(...chs) : (defCH || ''), qty: 1, doors: 0, winCount: 0, windows: [], faces: g, src: 'plan', color: nextColor(), openRuns: runs, ...(geo.holes ? { holes: geo.holes, ...(holesOn ? {} : { noHoles: true }) } : {}) });
       if (geo.holes && !holesOn) p.rooms[p.rooms.length - 1].area = Math.round((geo.area - geo.holes.area) * 100) / 100;
     });
@@ -1106,7 +1167,7 @@ function stepRooms(ctx) {
     if (p.drawing && p.drawing.plan) {
       view = planView(body.querySelector('#dwgView'), p.drawing.plan, {
         keep: keepV,
-        selected: () => sel, owner, fixtures: fxList, symbols: () => symList(p.drawing).map(s => ({ b: s.b, color: SYM_VERDICTS[s.verdict].color, label: s.verdict === 'hit' ? s.category : s.verdict === 'near' ? '類似' : '不明', on: s.k === symSel })), roomJudge: () => roomJudgeEntries(p.drawing), bg: p.drawing.bg && p.sketch && p.sketch.img ? { ...p.sketch.img, s: p.drawing.bg.s } : null, fixSel: () => (mode === 'fix' ? fsel : -1), mode: () => mode, fixG: p.drawing.fixG || '', fixGd: p.drawing.fixGd || '',
+        selected: () => sel, owner, fixtures: fxList, symbols: () => symList(p.drawing).map(s => ({ b: s.b, color: SYM_VERDICTS[s.verdict].color, label: s.verdict === 'hit' ? s.category : s.verdict === 'near' ? '類似' : '不明', on: s.k === symSel })), roomJudge: () => roomJudgeEntries(p.drawing), zones: () => zoneEntries(p.drawing, zoneSel), bg: p.drawing.bg && p.sketch && p.sketch.img ? { ...p.sketch.img, s: p.drawing.bg.s } : null, fixSel: () => (mode === 'fix' ? fsel : -1), mode: () => mode, fixG: p.drawing.fixG || '', fixGd: p.drawing.fixGd || '',
         extraTools: `<button class="iconbtn" data-act="dwgFs" title="${dwgFs ? '全画面をやめる' : '全画面で編集する'}" aria-label="${dwgFs ? '全画面をやめる' : '全画面で編集する'}">${icon(dwgFs ? 'shrink' : 'full')}</button>`,
         marks: () => faceMarks(),
         /* 部屋にした区画は、区画ごとの番号を消して、部屋に1つだけ名前と広さを出す（かつ「まとめたら細かい区画の数字消して真ん中にまとめた数字に」） */
@@ -1122,7 +1183,7 @@ function stepRooms(ctx) {
           if (sel.has(i)) sel.delete(i); else { sel.add(i); const fm = faceMarks(), m = fm && (fm[i] || fm[String(i)]); if (m) toast((m.type === 'off' || m.type === 'join') ? m.why : (m.s === 'out' ? '部屋ではないと見ている区画です：' : '決めきれない区画です：') + m.why + '。部屋にする時は、このまま選んで進められます', { ms: 7000 }); } paintSel(); },
         onDragStart: (x, y, sc) => dragStart(x, y, sc),
         /* 虫めがねの吸い付き：測る・カッター・壁の範囲・照明の置き場所で、線の端や線の上に吸い付く */
-        snap: (x, y, sc) => (mode === 'meas' || mode === 'cut' || (mode === 'wall' && wway === 'range')) ? snapPt(p.drawing.plan, x, y, sc * 40) : [x, y],
+        snap: (x, y, sc) => (mode === 'meas' || mode === 'cut' || mode === 'zsplit' || (mode === 'wall' && wway === 'range')) ? snapPt(p.drawing.plan, x, y, sc * 40) : [x, y],
         onPoint: (x, y, sc, lp) => {
           const snapAt = (t) => lp ? [x, y] : snapPt(p.drawing.plan, x, y, t);
           if (mode === 'fix') {
@@ -1213,6 +1274,7 @@ function stepRooms(ctx) {
             if (i >= 0) { if (wsel.has(i)) wsel.delete(i); else wsel.add(i); paintSel(); }
             return;
           }
+          if (mode === 'zsplit') { if (zsplit) { zsplit.pts.push(snapAt(sc * 44)); paintSel(); } return; }
           if (mode === 'cut') {
             const q = snapAt(sc * 44);
             if (!cutA) { cutA = q; paintSel(); return; }
@@ -1267,6 +1329,7 @@ function stepRooms(ctx) {
         p.drawing = { fileName: (cad ? [cad] : files).map(f => f.name).join('、'), at: Date.now(), plan: res.plan, fixtures: cad ? res.fixtures : null, open: cad ? res.open : null, doors: cad ? (res.doorList || []) : [], fixG: cad ? res.fixG : '', fixGd: cad ? res.fixGd : '' };
         /* 机・椅子などの家具：線の集まりから形の候補を切り出して覚える（判定はシンボル辞書。器具・見積の数字は変えない） */
         if (cad) { try { p.drawing.furn = detectFurniture(res.plan.segs || [], res.fixtures || [], res.doorList || []); } catch (e2) { console.warn('家具の検出に失敗', e2); p.drawing.furn = []; } }
+        if (cad) { try { p.drawing.zones = computeZones({ segs: res.plan.segs || [], faces: res.plan.faces || [], texts: res.texts || [], doors: res.doorList || [] }).map(z => ({ id: uid('z'), fixed: false, ...z })); } catch (e2) { console.warn('ゾーン分けに失敗', e2); p.drawing.zones = []; } }
         /* 新しい読み取り（js/reader2）：図枠・表の印を作って覚えておく。今の読み取りの結果（区画・器具）は変えない。画面に出すのは「新しい読み取り」を選んだ時だけ */
         /* 解析を後で作り直せるように、文字・長い線・ドアを覚えておく（解析の作りを直した時、開いただけで新しい解析になる） */
         if (cad) p.drawing.src2 = { texts: res.texts || [], segs: res.longSegs && res.longSegs.length ? res.longSegs : [], doors: res.doorList || [] };
@@ -1380,6 +1443,38 @@ function stepRooms(ctx) {
     if (sed) { const u = userSyms().find(q => q.id === sed.dataset.symedit); if (u) openSymEditor(u, () => paintSel()); return; }
     const sdel = e.target.closest('[data-symdel]');
     if (sdel) { saveUserSyms(userSyms().filter(q => q.id !== sdel.dataset.symdel)); paintSel(); toast('自分の辞書から消しました'); return; }
+    const zb = e.target.closest('[data-zsel],[data-zroom],[data-zsplit],[data-zname],[data-zmerge],[data-zdel],[data-zmake]');
+    if (zb) {
+      const d = p.drawing, Z = d.zones || (d.zones = []);
+      const zref = () => { const zbox = body.querySelector('#dwgZone'); if (zbox) zbox.innerHTML = zoneSummary(d, zoneSel); };
+      if (zb.dataset.zmake != null) {
+        const fixed = Z.filter(z => z.fixed);
+        const usedF = new Set(fixed.flatMap(z => z.faces));
+        try {
+          const fresh = computeZones({ segs: d.plan.segs || [], faces: d.plan.faces || [], texts: (d.src2 && d.src2.texts) || [], doors: d.doors || [] })
+            .map(z => ({ ...z, faces: z.faces.filter(i => !usedF.has(i)) }))
+            .filter(z => z.faces.length || z.area >= 20)
+            .map(z => ({ id: uid('z'), fixed: false, ...z }));
+          d.zones = [...fixed, ...fresh];
+          zoneSel = ''; touch(p); zref(); paintSel();
+          toast(fresh.length ? `ゾーン分けしました（全部で${d.zones.length}件）` : 'ゾーンにできる範囲が見つかりませんでした', fresh.length ? {} : { bad: true });
+        } catch (e2) { console.warn('ゾーン分けに失敗', e2); toast('ゾーン分けに失敗しました', { bad: true }); }
+        return;
+      }
+      const zid = zb.dataset.zsel || zb.dataset.zroom || zb.dataset.zsplit || zb.dataset.zname || zb.dataset.zmerge || zb.dataset.zdel;
+      if (zb.dataset.zsel != null) { zoneSel = zoneSel === zid ? '' : zid; zref(); paintSel(); return; }
+      const z = Z.find(q => q.id === zid);
+      if (!z) return;
+      if (zb.dataset.zroom != null) { zoneNameOnce = z.name || ''; sel.clear(); z.faces.forEach(i => sel.add(i)); zoneSel = ''; makeRooms(false); return; }
+      if (zb.dataset.zsplit != null) { mode = 'zsplit'; zsplit = { id: z.id, pts: [] }; paintSel(); window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+      if (zb.dataset.zname != null) { openZoneEditor(z, () => { touch(p); zref(); paintSel(); }); return; }
+      if (zb.dataset.zmerge != null) {
+        const t = Z.find(q => q.id === zoneSel);
+        if (t && t !== z) { t.faces = [...new Set([...t.faces, ...z.faces])]; t.area = Math.round((t.area + z.area) * 10) / 10; t.fixed = true; d.zones = Z.filter(q => q !== z); touch(p); zref(); paintSel(); toast(`「${t.name || '名前なし'}」に合体しました`); }
+        return;
+      }
+      if (zb.dataset.zdel != null) { d.zones = Z.filter(q => q !== z); if (zoneSel === z.id) zoneSel = ''; touch(p); zref(); paintSel(); return; }
+    }
     const sz = e.target.closest('[data-sheetzoom]');
     if (sz) { sheetZoom = sz.dataset.sheetzoom; const x = sheetsOf(p.drawing).find(q => q.key === sheetZoom); if (view && view.zoomTo) view.zoomTo(x ? x.box : null); return; }
     const mb = e.target.closest('[data-mode]');
@@ -1389,7 +1484,7 @@ function stepRooms(ctx) {
     if (lt) { ltool = lt.dataset.ltool; linkSel = null; paintSel(); return; }
     const pw = e.target.closest('[data-pwhere]');
     if (pw) { pset.where = pw.dataset.pwhere; pfaces.clear(); psegs.clear(); psel = null; paintSel(); return; }
-    if (mb) { mode = mb.dataset.mode; psel = null; pfaces.clear(); psegs.clear(); fsel = -1; addAt = null; cutA = null; linkSel = null; wsel.clear(); wpts.length = 0; if (mode !== 'meas') { meas.pts = []; meas.redo = []; } paintSel(); return; }
+    if (mb) { mode = mb.dataset.mode; psel = null; pfaces.clear(); psegs.clear(); fsel = -1; addAt = null; cutA = null; linkSel = null; zsplit = null; wsel.clear(); wpts.length = 0; if (mode !== 'meas') { meas.pts = []; meas.redo = []; } paintSel(); return; }
     const fb = e.target.closest('[data-face]');
     if (fb) { const i = +fb.dataset.face; if (sel.has(i)) sel.delete(i); else sel.add(i); paintSel(); return; }
     const da = e.target.closest('[data-act]');
@@ -1487,6 +1582,25 @@ function stepRooms(ctx) {
         return;
       }
       if (a === 'cutCancel') { cutA = null; paintSel(); return; }
+      if (a === 'zsplitGo') {
+        const d = p.drawing, Z = d.zones || [];
+        const z = Z.find(q => q.id === (zsplit && zsplit.id));
+        if (z && zsplit && zsplit.pts.length >= 2) {
+          const byI = new Map(d.plan.faces.map(f => [f.i, f]));
+          const F = z.faces.map(i => byI.get(i)).filter(Boolean);
+          const [A, B] = splitFacesByLine(F, zsplit.pts);
+          if (!A.length || !B.length) { toast('線の両側に区画が分かれませんでした。線を長めに引いてください', { bad: true }); return; }
+          const areaB = Math.round(z.area * B.length / (A.length + B.length) * 10) / 10;
+          const cB = B.map(i => byI.get(i)).filter(Boolean);
+          const nz = { id: uid('z'), name: z.name ? z.name + ' 2' : '', faces: B, area: areaB, x: Math.round(cB.reduce((s, f) => s + f.cx, 0) / Math.max(1, cB.length) * 100) / 100, y: Math.round(cB.reduce((s, f) => s + f.cy, 0) / Math.max(1, cB.length) * 100) / 100, fixed: true };
+          z.faces = A; z.area = Math.round((z.area - areaB) * 10) / 10; z.fixed = true;
+          Z.push(nz); zoneSel = nz.id;
+          toast(`2つのゾーンに分けました（新しい方は「${nz.name || '名前なし'}」）`);
+        }
+        mode = 'room'; zsplit = null; touch(p); paintSel(); return;
+      }
+      if (a === 'zsplitUndo') { if (zsplit) zsplit.pts.pop(); paintSel(); return; }
+      if (a === 'zsplitCancel') { mode = 'room'; zsplit = null; paintSel(); return; }
       if (a === 'wallAdd') {
         const segs = wway === 'seg' ? [...wsel] : null, pts = wway === 'range' ? wpts.map(q => [r3(q[0]), r3(q[1])]) : null;
         const len = segs ? segs.reduce((s2, i) => s2 + segLen(p.drawing.plan.segs[i]), 0) : pts.reduce((s2, q, i) => i ? s2 + Math.hypot(q[0] - pts[i - 1][0], q[1] - pts[i - 1][1]) : 0, 0);
