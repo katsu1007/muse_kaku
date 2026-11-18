@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ja" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0c1016">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="KAKU">
+<title>KAKU | 見積もりワークスペース</title>
+<link rel="manifest" href="./manifest.json">
+<link rel="icon" href="./icon-192.png">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<link rel="stylesheet" href="./css/app.css">
+<script>
+  /* 画面が出る前に明るさを合わせる（ちらつき防止）。正式な設定は保存場所から読む */
+  try { var t = localStorage.getItem('kaku2-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+</head>
+<body>
+<div class="shell">
+  <aside class="side" id="side"></aside>
+  <div class="main">
+    <header class="top" id="top"></header>
+    <main class="content" id="view"><div class="empty">読み込んでいます…</div></main>
+  </div>
+</div>
+<nav class="bottom" id="bottom"></nav>
+<div id="print"></div>
+<noscript>KAKU を使うには JavaScript を有効にしてください。</noscript>
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>
