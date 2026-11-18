@@ -14,7 +14,7 @@ import { classifyBox, classifyCluster, SYM_VERDICTS, SYM_DICT } from './symdict.
 import { detectFurniture } from './furndetect.js';
 import { judgeRooms, ROOM_JUDGE } from './roomjudge.js';
 import { computeZones, splitFacesByLine } from './zones.js';
-import { extractDxfDims, checkDimensions } from './dxf-dims.js';
+import { extractDxfDims, checkDimensions, dimCheckFor } from './dxf-dims.js';
 import { USES, DEF_LM, needCount, pitchFor, luxOf, wirePlan, cableQty, pip, polyD } from './lighting.js';
 /* iPhone・iPad では、選べるファイルの種類を絞ると .jww・.jwc・.dxf が灰色になって選べない（iPhone がこの拡張子を知らないため）。
    なので iPhone・iPad では絞らない。何を選んでも、読み込む時に拡張子で見分けるので困らない */
@@ -515,9 +515,10 @@ function dimSummary(d) {
   if (!dims.length) return '';
   const chips = dims.slice(0, 60).map(x => `<span class="pill">${esc(x.text)}</span>`).join('');
   /* 寸法の答え合わせ（読み込み時に集計した d.dimCheck。表示だけで、縮尺を自動で直すことはしない。
-   * 古い保存には dimCheck が無いので、その時は寸法の一覧だけ出す） */
+   * dimCheck が無い保存でも、寸法に定義点が残っていれば dimCheckFor がその場で作り直す。
+   * 定義点も無い古い保存（.28 以前）の時は、寸法の一覧だけ出す） */
   let check = '';
-  const chk = d && d.dimCheck;
+  const chk = dimCheckFor(d);
   if (chk && chk.n >= 1 && typeof chk.median === 'number') {
     const outliers = chk.outliers || [], edited = chk.edited || [];
     if (Math.abs(chk.median - 1) > 0.01) {

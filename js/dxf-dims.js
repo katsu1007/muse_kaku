@@ -169,6 +169,20 @@ export function extractDxfDims(input) {
  *     outliers 比率が中央値から 1% を超えて外れた寸法（部分的な別縮尺・図形の手違いの疑い）
  *     edited   表示文字が実測値の丸め範囲（整数化で最大 0.5mm）を超えて違う寸法
  *              （手入力で寸法文字が書き換えられた疑い。'R600' のような数値でない文字は対象外） */
+/* 図面の覚え書きから答え合わせを用意する。読み込みの時に付けた d.dimCheck があればそれを返し、
+ * 無ければ、覚えている寸法（定義点つき）から作り直して d.dimCheck に覚える。
+ * 読み込み側の版が古いまま図面を取り込むと（更新直後の画面など）、寸法は新しい形で残っても
+ * dimCheck だけ付かないことがある。作り直せる材料は寸法に残っているので、表示の時に補う。
+ * 定義点の無い寸法（.28 以前の形）からは比率を出せないので、その時は null（読み直しが必要） */
+export function dimCheckFor(d) {
+  if (!d || !Array.isArray(d.dims) || !d.dims.length) return null;
+  if (d.dimCheck) return d.dimCheck;
+  if (!d.dims.some(x => x && x.p1 && x.p2)) return null;
+  const chk = checkDimensions(d.dims);
+  d.dimCheck = chk;
+  return chk;
+}
+
 export function checkDimensions(dims) {
   const list = Array.isArray(dims) ? dims : [];
   const withRatio = [];

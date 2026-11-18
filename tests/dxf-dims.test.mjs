@@ -2,7 +2,7 @@
  * 実測値（42）・定義点からの計算・表示文字・拾う範囲（ENTITIES だけ）を確かめる */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractDxfDims, checkDimensions } from '../js/dxf-dims.js';
+import { extractDxfDims, checkDimensions, dimCheckFor } from '../js/dxf-dims.js';
 
 /* コードと値の組から DXF 文字列を作る */
 const build = pairs => pairs.map(([c, v]) => `${c}\n${v}`).join('\n') + '\n';
@@ -166,4 +166,34 @@ test('答え合わせ：定義点の無い寸法は件数に入らない', () =>
 
 test('答え合わせ：寸法が無ければ n=0・median=null', () => {
   assert.deepEqual(checkDimensions([]), { n: 0, median: null, outliers: [], edited: [] });
+});
+
+/* アプリの流れの回帰：読み込みは ArrayBuffer を渡し、図面の覚え書きは { dims, dimCheck } で持つ。
+ * 更新直後の画面など読み込み側の版が古いままだと、寸法は新しい形で残っても dimCheck だけ
+ * 付かないことがあった（実機で確認行が出なかった不具合）。表示の時に作り直せることを確かめる */
+const toArrayBuffer = s => { const u = new TextEncoder().encode(s); return u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength); };
+
+test('流れ：dimCheck の無い図面でも、ArrayBuffer から拾った寸法で答え合わせを作り直せる', () => {
+  const dims = extractDxfDims(toArrayBuffer(consistentDxf())); /* アプリと同じ ArrayBuffer 入力 */
+  const drawing = { dims }; /* 読み込みで dimCheck を付け損ねた図面の形 */
+  const chk = dimCheckFor(drawing);
+  assert.ok(chk);
+  assert.equal(chk.n, 3);
+  assert.ok(Math.abs(chk.median - 1) < 1e-9);
+  assert.equal(drawing.dimCheck, chk); /* 作り直したら覚える */
+  assert.equal(dimCheckFor(drawing), chk); /* 2回目は覚えた物をそのまま返す */
+});
+
+test('流れ：dimCheck が既にある図面は、そのまま返す（作り直さない）', () => {
+  const preset = { n: 9, median: 50, outliers: [], edited: [] };
+  const drawing = { dims: extractDxfDims(consistentDxf()), dimCheck: preset };
+  assert.equal(dimCheckFor(drawing), preset);
+});
+
+test('流れ：定義点の無い寸法（.28 以前の形）からは作り直さない（読み直しが必要）', () => {
+  const drawing = { dims: [{ type: 'linear', value: 1000, text: '1000', x: 0, y: 0 }] };
+  assert.equal(dimCheckFor(drawing), null);
+  assert.equal(drawing.dimCheck, undefined);
+  assert.equal(dimCheckFor(null), null);
+  assert.equal(dimCheckFor({ dims: [] }), null);
 });
