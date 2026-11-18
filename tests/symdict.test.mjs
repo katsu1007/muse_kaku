@@ -42,3 +42,38 @@ test('どれにも合わない形は「不明」', () => {
   const r = classifySymbol({ short: 1200, long: 1250, arcShare: 0.5, closed: true, innerClosed: false, dividers: null });
   assert.equal(r.result, '不明');
 });
+
+import { classifyBox, SYM_VERDICTS } from '../js/symdict.js';
+
+test('外形だけの判定：小便器 370×420mm は検出（小便器）', () => {
+  const r = classifyBox([0, 0, 0.37, 0.42]);
+  assert.equal(r.verdict, 'hit');
+  assert.equal(r.category, '小便器');
+});
+
+test('外形だけの判定：ロッカー 900×565mm は検出（ロッカー）', () => {
+  const r = classifyBox([0, 0, 0.9, 0.565]);
+  assert.equal(r.verdict, 'hit');
+  assert.equal(r.category, 'ロッカー');
+});
+
+test('外形だけの判定：大便器 398×497mm は洗面器などと分かれず類似（確定しない）', () => {
+  const r = classifyBox([0, 0, 0.398, 0.497]);
+  assert.equal(r.verdict, 'near');
+});
+
+test('外形だけの判定：辞書に無い大きさ（2000×900mm）は不明', () => {
+  const r = classifyBox([0, 0, 2.0, 0.9]);
+  assert.equal(r.verdict, 'unknown');
+  assert.equal(r.category, null);
+});
+
+test('外形だけの判定：外形が無い・壊れている時は不明', () => {
+  assert.equal(classifyBox(null).verdict, 'unknown');
+  assert.equal(classifyBox([0, 0]).verdict, 'unknown');
+});
+
+test('3区分の色は互いに違う', () => {
+  const cs = [SYM_VERDICTS.hit.color, SYM_VERDICTS.near.color, SYM_VERDICTS.unknown.color];
+  assert.equal(new Set(cs).size, 3);
+});

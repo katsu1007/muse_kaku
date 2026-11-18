@@ -396,6 +396,26 @@ export function scorePattern(p, f) {
   return 0.90 + 0.10 * (cs(f.short, sr.short) + cs(f.long, sr.long)) / 2;
 }
 
+/* 判定の3区分（画面の色分け用）：検出＝緑、類似＝橙、不明＝灰色 */
+export const SYM_VERDICTS = {
+  hit: { key: "hit", name: "検出", color: "#3ccf8e" },
+  near: { key: "near", name: "類似", color: "#ffb020" },
+  unknown: { key: "unknown", name: "不明", color: "#9aa7b8" }
+};
+
+/* 図面から拾った器具の外形（b = [x0, y0, x1, y1]、単位は m）から辞書で判定する。
+ * 器具のデータには外形しか無いので、判定に使う特徴は寸法だけ（円弧の割合・輪郭の閉じなどは null＝ゲートを通す）。
+ * 戻り値: { verdict: "hit" | "near" | "unknown", category, score, short, long }（short/long は mm） */
+export function classifyBox(b) {
+  if (!b || b.length < 4) return { verdict: "unknown", category: null, score: 0, short: 0, long: 0 };
+  const w = Math.abs(b[2] - b[0]) * 1000, h = Math.abs(b[3] - b[1]) * 1000;
+  const short = Math.min(w, h), long = Math.max(w, h);
+  const r = classifySymbol({ short, long, arcShare: null, closed: null, innerClosed: null, dividers: null });
+  if (r.result === "不明") return { verdict: "unknown", category: null, score: r.score, short, long };
+  if (r.result === "要確認") return { verdict: "near", category: r.category, score: r.score, short, long };
+  return { verdict: "hit", category: r.result, score: r.score, short, long };
+}
+
 /* 戻り値: { result: カテゴリ名 | "要確認" | "不明", score, category, label } */
 export function classifySymbol(f) {
   const hits = [];

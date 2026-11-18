@@ -10,6 +10,7 @@ import { SYS, MANY, sysOptions, rebuild, PIPE_LOSS } from './piping.js';
 import { importDrawing, groupGeom, roomHoles, planCH, orderFaces as orderFacesOf } from './drawing.js';
 import { readWithFixtures, oldFaceLights, roomOpenRuns, FIX_NAMES, FIX_ITEMS, FIX_WORDS } from './legacy.js';
 import { planView, roomColor } from './planview.js';
+import { classifyBox, SYM_VERDICTS } from './symdict.js';
 import { USES, DEF_LM, needCount, pitchFor, luxOf, wirePlan, cableQty, pip, polyD } from './lighting.js';
 /* iPhone・iPad では、選べるファイルの種類を絞ると .jww・.jwc・.dxf が灰色になって選べない（iPhone がこの拡張子を知らないため）。
    なので iPhone・iPad では絞らない。何を選んでも、読み込む時に拡張子で見分けるので困らない */
@@ -268,7 +269,7 @@ function drawingCard(p) {
     ${oldReadRow(d)}${sheetRow(d)}<div id="dwgView"></div>${sheetNotes(d)}${titleRow(p)}
     <div class="addbar" style="margin-top:10px" id="dwgBar"></div></div>
     <div id="dwgDemo"></div>
-    <div id="dwgFix">${fixSummary(d)}</div>${elecRow(p)}
+    <div id="dwgFix">${fixSummary(d)}</div><div id="dwgSym">${symSummary(d)}</div>${elecRow(p)}
     <details class="more"><summary>区画の一覧から選ぶ（図面で押しにくい小さい区画など）</summary><div class="facelist" id="dwgFaces"></div></details>
     ${r2row(d)}
     <div class="small muted" id="dwgStatus" style="margin-top:6px"></div></div>`;
@@ -371,6 +372,30 @@ function r2row(d) {
   const st = A.stats, on = d.reader === 'v2', any = st.out || st.hold;
   return `<div class="row" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)"><label class="row" style="gap:8px;min-height:44px;cursor:pointer"><input type="checkbox" data-reader2 ${on ? 'checked' : ''} style="width:22px;height:22px"><b class="small">新しい読み取り（試し）：図枠・表を部屋にしない</b></label>
     <span class="small muted">${any ? `図枠 ${st.frames}・表 ${st.tables} を見つけました。部屋ではないと見た区画 ${st.out}・決めきれない区画 ${st.hold}` : st.frames ? `図枠 ${st.frames} を見つけました。印を付ける区画はありませんでした` : '図枠・表は見つかりませんでした（今までの読み取りと同じです）'}${on && any ? '。灰色＝部屋ではない、点線＝決めきれない。タップすると理由が出ます' : ''}${r2lines(d, on)}${r2more(A, on)}</span></div>`;
+}
+
+/* 拾った器具をシンボル辞書で判定し直した結果（外形の寸法だけの判定。結果は図面ごとに覚える） */
+const symCache = new WeakMap();
+function symList(d) {
+  const fx = (d && d.fixtures) || [];
+  if (!fx.length) return [];
+  const c = symCache.get(d);
+  if (c && c.from === fx) return c.list;
+  const list = fx.map((x, k) => ({ k, b: x && x.b, t: x && x.t, ...(x && x.b ? classifyBox(x.b) : { verdict: 'unknown', category: null, score: 0, short: 0, long: 0 }) })).filter(s => s.b);
+  symCache.set(d, { from: fx, list });
+  return list;
+}
+/* シンボルの判定の一覧：行を押すと図面のその場所へ飛ぶ */
+function symSummary(d, selK = -1) {
+  const S = symList(d);
+  if (!S.length) return '';
+  const cnt = { hit: 0, near: 0, unknown: 0 }; S.forEach(s => cnt[s.verdict]++);
+  const label = s => s.verdict === 'hit' ? s.category : s.verdict === 'near' ? `類似：${s.category || '不明'}` : '不明';
+  const rows = S.slice(0, 150).map(s => `<button class="btn sm" data-sym="${s.k}" style="justify-content:flex-start;gap:8px;min-height:40px;width:100%;text-align:left${s.k === selK ? ';border-color:var(--accent);background:rgba(255,138,61,.10)' : ''}"><span style="width:12px;height:12px;border-radius:3px;background:${SYM_VERDICTS[s.verdict].color};flex:none"></span><b>${esc(label(s))}</b><span class="muted">${Math.round(s.short)}×${Math.round(s.long)}mm</span>${s.t && FIX_NAMES[s.t] ? `<span class="muted">（今の判定：${esc(FIX_NAMES[s.t])}）</span>` : ''}</button>`).join('');
+  return `<div class="row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)"><b class="small">シンボルの判定（辞書）</b>
+    ${['hit', 'near', 'unknown'].map(v => `<span class="pill" style="border:1px solid ${SYM_VERDICTS[v].color};color:${SYM_VERDICTS[v].color}">${SYM_VERDICTS[v].name} ${cnt[v]}</span>`).join('')}
+    <span class="small muted">寸法だけの判定です。行を押すと図面のその場所へ飛びます。色は図面の「符」ボタンで消せます</span></div>
+    <div style="margin-top:8px;display:grid;gap:6px;max-height:320px;overflow:auto">${rows}${S.length > 150 ? `<div class="small muted">ほか ${S.length - 150} 件（先頭150件だけ出しています）</div>` : ''}</div>`;
 }
 
 function fixSummary(d) {
@@ -578,7 +603,7 @@ function stepRooms(ctx) {
   const { p, body, refresh } = ctx;
   const sel = new Set();
   let view = null;
-  let mode = 'room', fsel = -1, addAt = null, cutA = null, ltool = 'light', linkSel = null;
+  let mode = 'room', fsel = -1, symSel = -1, addAt = null, cutA = null, ltool = 'light', linkSel = null;
   let holesOn = true, selGeoKey = '', selGeo = null;   // 選んでいる区画の中の「囲まれた所」を床に入れるか（部屋にする前に決める）
   let sheetZoom = '';   // 大きく出している図（図枠・段の位置のキー）。'' は全体
   const lset = state.lightSet || (state.lightSet = { room: 'all', use: '', item: 'e-dl100', lm: 800 });
@@ -759,6 +784,7 @@ function stepRooms(ctx) {
     if (view) { view.paint(); view.overlay(selHoles + sheetOverlay(p.drawing, view.lw, allTexts()) + demoOverlay() + placeOverlay() + (mode === 'meas' || addAt ? measOverlay() : '')); }
     const demoBox = body.querySelector('#dwgDemo'); if (demoBox) demoBox.innerHTML = demoList();
     const fxBox = body.querySelector('#dwgFix'); if (fxBox) fxBox.innerHTML = fixSummary(p.drawing);
+    const symBox = body.querySelector('#dwgSym'); if (symBox) symBox.innerHTML = symSummary(p.drawing, symSel);
     if (mode !== 'room') {
       const bar = body.querySelector('#dwgBar');
       if (mode === 'wall') {
@@ -1018,7 +1044,7 @@ function stepRooms(ctx) {
     if (p.drawing && p.drawing.plan) {
       view = planView(body.querySelector('#dwgView'), p.drawing.plan, {
         keep: keepV,
-        selected: () => sel, owner, fixtures: fxList, bg: p.drawing.bg && p.sketch && p.sketch.img ? { ...p.sketch.img, s: p.drawing.bg.s } : null, fixSel: () => (mode === 'fix' ? fsel : -1), mode: () => mode, fixG: p.drawing.fixG || '', fixGd: p.drawing.fixGd || '',
+        selected: () => sel, owner, fixtures: fxList, symbols: () => symList(p.drawing).map(s => ({ b: s.b, color: SYM_VERDICTS[s.verdict].color, label: s.verdict === 'hit' ? s.category : s.verdict === 'near' ? '類似' : '不明', on: s.k === symSel })), bg: p.drawing.bg && p.sketch && p.sketch.img ? { ...p.sketch.img, s: p.drawing.bg.s } : null, fixSel: () => (mode === 'fix' ? fsel : -1), mode: () => mode, fixG: p.drawing.fixG || '', fixGd: p.drawing.fixGd || '',
         extraTools: `<button class="iconbtn" data-act="dwgFs" title="${dwgFs ? '全画面をやめる' : '全画面で編集する'}" aria-label="${dwgFs ? '全画面をやめる' : '全画面で編集する'}">${icon(dwgFs ? 'shrink' : 'full')}</button>`,
         marks: () => faceMarks(),
         /* 部屋にした区画は、区画ごとの番号を消して、部屋に1つだけ名前と広さを出す（かつ「まとめたら細かい区画の数字消して真ん中にまとめた数字に」） */
@@ -1278,6 +1304,11 @@ function stepRooms(ctx) {
   body.addEventListener('click', async e => {
     const fsb = e.target.closest('[data-act="dwgFs"]');
     if (fsb) { dwgFs = !dwgFs; document.body.classList.toggle('dwg-fs-on', dwgFs); draw(); return; }
+    const symb = e.target.closest('[data-sym]');
+    if (symb) { const k = +symb.dataset.sym, s = symList(p.drawing).find(q => q.k === k);
+      symSel = symSel === k ? -1 : k;
+      if (s && view) { view.symShow(); view.paint(); if (symSel >= 0) { const pd = 0.6; view.zoomTo([s.b[0] - pd, s.b[1] - pd, s.b[2] + pd, s.b[3] + pd]); } }
+      const symBox = body.querySelector('#dwgSym'); if (symBox) symBox.innerHTML = symSummary(p.drawing, symSel); return; }
     const sz = e.target.closest('[data-sheetzoom]');
     if (sz) { sheetZoom = sz.dataset.sheetzoom; const x = sheetsOf(p.drawing).find(q => q.key === sheetZoom); if (view && view.zoomTo) view.zoomTo(x ? x.box : null); return; }
     const mb = e.target.closest('[data-mode]');
