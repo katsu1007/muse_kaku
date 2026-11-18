@@ -59,12 +59,40 @@ export function computeZones({ segs = [], faces = [], texts = [], doors = [], ma
       const rows = new Set(m.g.map(c => Math.round(c.cy * 2) / 2)).size, cols = new Set(m.g.map(c => Math.round(c.cx * 2) / 2)).size;
       if (!(m.g.length >= 8 || (m.g.length >= 5 && rows >= 2 && cols >= 2))) continue;
       m.g.forEach(c => excluded.add(c.f.i));
-      /* 表の外枠らしい区画（マスを5個以上含む四角）も一緒に入れない */
+      /* 表の外枠らしい区画（マスを5個以上含む四角）も一緒に入れない。
+       * 器具・ドア・部屋の名前がある区画は、表の枠ではなく部屋と見て残す */
       for (const c of infos) {
-        if (excluded.has(c.f.i) || c.fill < 0.9 || c.pa > 400) continue;
+        if (excluded.has(c.f.i) || c.fill < 0.8 || c.pa > 400) continue;
         const inside = m.g.filter(q => q.cx >= c.x0 && q.cx <= c.x1 && q.cy >= c.y0 && q.cy <= c.y1).length;
-        if (inside >= 5) excluded.add(c.f.i);
+        if (inside < 5) continue;
+        if (fxPts.some(q => q[0] >= c.x0 && q[0] <= c.x1 && q[1] >= c.y0 && q[1] <= c.y1)) continue;
+        if (drPts.some(q => q[0] >= c.x0 - 0.3 && q[0] <= c.x1 + 0.3 && q[1] >= c.y0 - 0.3 && q[1] <= c.y1 + 0.3)) continue;
+        const hasRoomText = (texts || []).some(t => t && t.x >= c.x0 && t.x <= c.x1 && t.y >= c.y0 && t.y <= c.y1 && classify(String(t.t || t.s || '')) === 'room');
+        if (!hasRoomText) excluded.add(c.f.i);
       }
+    }
+    /* 表が1つの大きな四角にまとまってしまった区画：中にある文字が全部「材料の名前」で、
+     * 部屋の名前・仕上げ注記・器具・ドアが無い四角は、仕上げ表などのマスの塊と見る */
+    const MAT_RE = /塗装|下地|クロス|タイル|シート|ボード|ケイカル|モルタル|仕上|カーペット|フロア/;
+    const FILLER_RE = /^(無し|なし|同上|－|—|-)$/;
+    for (const c of infos) {
+      if (excluded.has(c.f.i) || c.fill < 0.95 || c.pa < 5 || c.pa > 200 || c.f.poly.length > 8) continue;
+      if (fxPts.some(q => q[0] >= c.x0 && q[0] <= c.x1 && q[1] >= c.y0 && q[1] <= c.y1)) continue;
+      if (drPts.some(q => q[0] >= c.x0 - 0.3 && q[0] <= c.x1 + 0.3 && q[1] >= c.y0 - 0.3 && q[1] <= c.y1 + 0.3)) continue;
+      const ts = (texts || []).filter(t => t && t.x >= c.x0 && t.x <= c.x1 && t.y >= c.y0 && t.y <= c.y1).map(t => String(t.t || t.s || ''));
+      if (ts.filter(s => MAT_RE.test(s)).length < 3) continue;
+      if (ts.every(s => (MAT_RE.test(s) || FILLER_RE.test(s.trim())) && !NOTE_RE.test(s) && classify(s) !== 'room' && classify(s) !== 'ch')) excluded.add(c.f.i);
+    }
+    /* 表の見出し（設備機器・仕上げ表など）を含む大きな四角も、表の範囲と見る（器具表・仕上げ表の枠） */
+    const HDR_RE = /設備機器|仕上げ表|仕様表|機器表|器具表/;
+    for (const c of infos) {
+      if (excluded.has(c.f.i) || c.fill < 0.8 || c.pa < 5 || c.pa > 200 || c.f.poly.length > 8) continue;
+      if (fxPts.some(q => q[0] >= c.x0 && q[0] <= c.x1 && q[1] >= c.y0 && q[1] <= c.y1)) continue;
+      if (drPts.some(q => q[0] >= c.x0 - 0.3 && q[0] <= c.x1 + 0.3 && q[1] >= c.y0 - 0.3 && q[1] <= c.y1 + 0.3)) continue;
+      const ts = (texts || []).filter(t => t && t.x >= c.x0 && t.x <= c.x1 && t.y >= c.y0 && t.y <= c.y1).map(t => String(t.t || t.s || ''));
+      if (!ts.some(s => HDR_RE.test(s))) continue;
+      if (ts.some(s => classify(s) === 'room')) continue;
+      excluded.add(c.f.i);
     }
   }
 
