@@ -449,6 +449,40 @@ export const SYM_DICT = [
     "notes": "矩形主体。背面パネルの帯が付く型もある"
    },
    {
+    "origin": "rule",
+    "label": "ベンチデスク（長机）",
+    "size_range_mm": {
+     "short": [
+      550,
+      1800
+     ],
+     "long": [
+      2400,
+      7200
+     ]
+    },
+    "aspect_range": [
+     2,
+     9
+    ],
+    "primitives": {
+     "arc_share": [
+      0,
+      0.12
+     ],
+     "closed_outline": true,
+     "inner_closed": null,
+     "divider_min": 1,
+     "straight_back": null
+    },
+    "needs_features": [
+     "arcShare",
+     "closed",
+     "dividers"
+    ],
+    "notes": "両側に椅子が並ぶ長いベンチ式の机。内側に分割線（脚・配線ダクト等）がある事が条件。寸法だけでは判定しない（needs_features）"
+   },
+   {
     "origin": "measured",
     "label": "ベンチデスク一体型（CC0実測）",
     "source": {
@@ -1751,6 +1785,8 @@ export const SYM_DICT = [
 function gateRange(v, range) { return v == null || range == null || (v >= range[0] && v <= range[1]); }
 
 export function scorePattern(p, f) {
+  /* 特徴が要るパターン（例：ベンチデスクは分割線の本数が条件）は、特徴が無い入力（器具の寸法だけの判定）では当てない */
+  if (p.needs_features) for (const k of p.needs_features) if (f[k] == null) return null;
   if (p.origin === "measured") {
     const s = p.features.size_mm;
     const tolS = Math.max(18, s.short * 0.05), tolL = Math.max(18, s.long * 0.05);
@@ -1795,6 +1831,24 @@ export function classifyBox(b, userDict = []) {
       return { verdict: "hit", category: u.name, score: 1, short, long, mine: true };
   }
   const r = classifySymbol({ short, long, arcShare: null, closed: null, innerClosed: null, dividers: null });
+  if (r.result === "不明") return { verdict: "unknown", category: null, score: r.score, short, long };
+  if (r.result === "要確認") return { verdict: "near", category: r.category, score: r.score, short, long };
+  return { verdict: "hit", category: r.result, score: r.score, short, long };
+}
+
+/* 線の集まりから切り出した形（js/furndetect.js の候補）を判定する。
+ * f: { short, long（mm）, arcShare, closed, dividers }。自分の辞書が最優先（寸法で照合）。
+ * 戻り値は classifyBox と同じ形 */
+export function classifyCluster(f, userDict = []) {
+  const short = f && f.short, long = f && f.long;
+  if (!(short > 0) || !(long > 0)) return { verdict: "unknown", category: null, score: 0, short: 0, long: 0 };
+  for (const u of userDict || []) {
+    if (!u || !u.name || !(u.short > 0) || !(u.long > 0)) continue;
+    const tolS = Math.max(18, u.short * 0.05), tolL = Math.max(18, u.long * 0.05);
+    if (Math.abs(short - u.short) <= tolS && Math.abs(long - u.long) <= tolL)
+      return { verdict: "hit", category: u.name, score: 1, short, long, mine: true };
+  }
+  const r = classifySymbol({ short, long, arcShare: f.arcShare != null ? f.arcShare : null, closed: f.closed != null ? f.closed : null, innerClosed: null, dividers: f.dividers != null ? f.dividers : null });
   if (r.result === "不明") return { verdict: "unknown", category: null, score: r.score, short, long };
   if (r.result === "要確認") return { verdict: "near", category: r.category, score: r.score, short, long };
   return { verdict: "hit", category: r.result, score: r.score, short, long };
