@@ -10,7 +10,7 @@ import { SYS, MANY, sysOptions, rebuild, PIPE_LOSS } from './piping.js';
 import { importDrawing, groupGeom, roomHoles, planCH, orderFaces as orderFacesOf } from './drawing.js';
 import { readWithFixtures, oldFaceLights, roomOpenRuns, FIX_NAMES, FIX_ITEMS, FIX_WORDS } from './legacy.js';
 import { planView, roomColor } from './planview.js';
-import { classifyBox, SYM_VERDICTS } from './symdict.js';
+import { classifyBox, SYM_VERDICTS, SYM_DICT } from './symdict.js';
 import { USES, DEF_LM, needCount, pitchFor, luxOf, wirePlan, cableQty, pip, polyD } from './lighting.js';
 /* iPhone・iPad では、選べるファイルの種類を絞ると .jww・.jwc・.dxf が灰色になって選べない（iPhone がこの拡張子を知らないため）。
    なので iPhone・iPad では絞らない。何を選んでも、読み込む時に拡張子で見分けるので困らない */
@@ -374,15 +374,39 @@ function r2row(d) {
     <span class="small muted">${any ? `図枠 ${st.frames}・表 ${st.tables} を見つけました。部屋ではないと見た区画 ${st.out}・決めきれない区画 ${st.hold}` : st.frames ? `図枠 ${st.frames} を見つけました。印を付ける区画はありませんでした` : '図枠・表は見つかりませんでした（今までの読み取りと同じです）'}${on && any ? '。灰色＝部屋ではない、点線＝決めきれない。タップすると理由が出ます' : ''}${r2lines(d, on)}${r2more(A, on)}</span></div>`;
 }
 
+/* 自分の辞書：拾ったシンボルの寸法と「これは何か」を覚える（この端末の中だけ。寸法と名前だけを持ち、図形そのものは持たない） */
+const USER_SYM_KEY = 'muse-symdict-user';
+let symVer = 0;
+function userSyms() { try { return JSON.parse(localStorage.getItem(USER_SYM_KEY) || '[]').filter(u => u && u.id && u.name && u.short > 0 && u.long > 0); } catch (e) { return []; } }
+function saveUserSyms(list) { try { localStorage.setItem(USER_SYM_KEY, JSON.stringify(list)); } catch (e) { /* 保存できなくても続ける */ } symVer++; }
+/* 「これは何ですか」の編集画面。entry = { id?, name, short, long }。同じ寸法の登録があれば入れ替える */
+function openSymEditor(entry, onDone) {
+  const m = modal({ title: 'これは何ですか', body: `
+    <p class="small muted" style="margin-top:0">拾ったシンボルの寸法 <b>${entry.short}×${entry.long}mm</b> と、この名前を自分の辞書に覚えます。次からは、同じ寸法のシンボルがこの名前で「検出」になります。</p>
+    <label class="f">名前<input class="in" id="symName" type="text" value="${esc(entry.name || '')}" placeholder="例：大便器"></label>
+    <div class="row" style="margin-top:8px;flex-wrap:wrap;gap:6px">${SYM_DICT.map(e => `<button class="btn sm" data-cat="${esc(e.category)}">${esc(e.category)}</button>`).join('')}</div>`,
+    foot: `<button class="btn" data-close>やめる</button><button class="btn primary" data-save>覚える</button>` });
+  const input = m.el.querySelector('#symName');
+  m.el.querySelectorAll('[data-cat]').forEach(b => b.onclick = () => { input.value = b.dataset.cat; input.focus(); });
+  m.el.querySelector('[data-save]').onclick = () => {
+    const name = input.value.trim(); if (!name) { toast('名前を入れてください', { bad: true }); return; }
+    const list = userSyms().filter(u => u.id !== entry.id && !(Math.abs(u.short - entry.short) <= Math.max(18, entry.short * 0.05) && Math.abs(u.long - entry.long) <= Math.max(18, entry.long * 0.05)));
+    list.push({ id: entry.id || ('u' + Date.now().toString(36)), name, short: entry.short, long: entry.long, at: Date.now() });
+    saveUserSyms(list); m.close(); toast(`「${name}」として自分の辞書に覚えました`); onDone && onDone();
+  };
+  setTimeout(() => { try { input.focus(); } catch (e) { /* そのまま */ } }, 60);
+}
+
 /* 拾った器具をシンボル辞書で判定し直した結果（外形の寸法だけの判定。結果は図面ごとに覚える） */
 const symCache = new WeakMap();
 function symList(d) {
   const fx = (d && d.fixtures) || [];
   if (!fx.length) return [];
   const c = symCache.get(d);
-  if (c && c.from === fx) return c.list;
-  const list = fx.map((x, k) => ({ k, b: x && x.b, t: x && x.t, ...(x && x.b ? classifyBox(x.b) : { verdict: 'unknown', category: null, score: 0, short: 0, long: 0 }) })).filter(s => s.b);
-  symCache.set(d, { from: fx, list });
+  if (c && c.from === fx && c.ver === symVer) return c.list;
+  const mine = userSyms();
+  const list = fx.map((x, k) => ({ k, b: x && x.b, t: x && x.t, ...(x && x.b ? classifyBox(x.b, mine) : { verdict: 'unknown', category: null, score: 0, short: 0, long: 0 }) })).filter(s => s.b);
+  symCache.set(d, { from: fx, ver: symVer, list });
   return list;
 }
 /* シンボルの判定の一覧：行を押すと図面のその場所へ飛ぶ */
@@ -391,11 +415,13 @@ function symSummary(d, selK = -1) {
   if (!S.length) return '';
   const cnt = { hit: 0, near: 0, unknown: 0 }; S.forEach(s => cnt[s.verdict]++);
   const label = s => s.verdict === 'hit' ? s.category : s.verdict === 'near' ? `類似：${s.category || '不明'}` : '不明';
-  const rows = S.slice(0, 150).map(s => `<button class="btn sm" data-sym="${s.k}" style="justify-content:flex-start;gap:8px;min-height:40px;width:100%;text-align:left${s.k === selK ? ';border-color:var(--accent);background:rgba(255,138,61,.10)' : ''}"><span style="width:12px;height:12px;border-radius:3px;background:${SYM_VERDICTS[s.verdict].color};flex:none"></span><b>${esc(label(s))}</b><span class="muted">${Math.round(s.short)}×${Math.round(s.long)}mm</span>${s.t && FIX_NAMES[s.t] ? `<span class="muted">（今の判定：${esc(FIX_NAMES[s.t])}）</span>` : ''}</button>`).join('');
+  const rows = S.slice(0, 150).map(s => `<div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn sm" data-sym="${s.k}" style="justify-content:flex-start;gap:8px;min-height:40px;flex:1;text-align:left${s.k === selK ? ';border-color:var(--accent);background:rgba(255,138,61,.10)' : ''}"><span style="width:12px;height:12px;border-radius:3px;background:${SYM_VERDICTS[s.verdict].color};flex:none"></span><b>${esc(label(s))}</b><span class="muted">${Math.round(s.short)}×${Math.round(s.long)}mm</span>${s.mine ? '<span class="muted">（自分の辞書）</span>' : s.t && FIX_NAMES[s.t] ? `<span class="muted">（今の判定：${esc(FIX_NAMES[s.t])}）</span>` : ''}</button><button class="btn sm" data-symreg="${s.k}" style="min-height:40px;flex:none">${s.mine ? '直す' : 'これは何？'}</button></div>`).join('');
+  const mine = userSyms();
+  const mineHtml = mine.length ? `<div style="margin-top:10px"><b class="small">自分の辞書（${mine.length}件）</b><div style="display:grid;gap:6px;margin-top:6px">${mine.map(u => `<div class="row" style="gap:6px"><span class="pill" style="border:1px solid ${SYM_VERDICTS.hit.color};color:${SYM_VERDICTS.hit.color}">${esc(u.name)}</span><span class="small muted">${u.short}×${u.long}mm</span><span class="spacer"></span><button class="btn sm" data-symedit="${u.id}">名前を直す</button><button class="btn sm ghost danger" data-symdel="${u.id}">消す</button></div>`).join('')}</div></div>` : '';
   return `<div class="row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)"><b class="small">シンボルの判定（辞書）</b>
     ${['hit', 'near', 'unknown'].map(v => `<span class="pill" style="border:1px solid ${SYM_VERDICTS[v].color};color:${SYM_VERDICTS[v].color}">${SYM_VERDICTS[v].name} ${cnt[v]}</span>`).join('')}
     <span class="small muted">寸法だけの判定です。行を押すと図面のその場所へ飛びます。色は図面の「符」ボタンで消せます</span></div>
-    <div style="margin-top:8px;display:grid;gap:6px;max-height:320px;overflow:auto">${rows}${S.length > 150 ? `<div class="small muted">ほか ${S.length - 150} 件（先頭150件だけ出しています）</div>` : ''}</div>`;
+    <div style="margin-top:8px;display:grid;gap:6px;max-height:320px;overflow:auto">${rows}${S.length > 150 ? `<div class="small muted">ほか ${S.length - 150} 件（先頭150件だけ出しています）</div>` : ''}</div>${mineHtml}`;
 }
 
 function fixSummary(d) {
@@ -1309,6 +1335,13 @@ function stepRooms(ctx) {
       symSel = symSel === k ? -1 : k;
       if (s && view) { view.symShow(); view.paint(); if (symSel >= 0) { const pd = 0.6; view.zoomTo([s.b[0] - pd, s.b[1] - pd, s.b[2] + pd, s.b[3] + pd]); } }
       const symBox = body.querySelector('#dwgSym'); if (symBox) symBox.innerHTML = symSummary(p.drawing, symSel); return; }
+    const sreg = e.target.closest('[data-symreg]');
+    if (sreg) { const s = symList(p.drawing).find(q => q.k === +sreg.dataset.symreg);
+      if (s) openSymEditor({ name: s.mine ? s.category : '', short: Math.round(s.short), long: Math.round(s.long) }, () => { symSel = s.k; paintSel(); }); return; }
+    const sed = e.target.closest('[data-symedit]');
+    if (sed) { const u = userSyms().find(q => q.id === sed.dataset.symedit); if (u) openSymEditor(u, () => paintSel()); return; }
+    const sdel = e.target.closest('[data-symdel]');
+    if (sdel) { saveUserSyms(userSyms().filter(q => q.id !== sdel.dataset.symdel)); paintSel(); toast('自分の辞書から消しました'); return; }
     const sz = e.target.closest('[data-sheetzoom]');
     if (sz) { sheetZoom = sz.dataset.sheetzoom; const x = sheetsOf(p.drawing).find(q => q.key === sheetZoom); if (view && view.zoomTo) view.zoomTo(x ? x.box : null); return; }
     const mb = e.target.closest('[data-mode]');

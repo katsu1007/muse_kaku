@@ -405,11 +405,19 @@ export const SYM_VERDICTS = {
 
 /* 図面から拾った器具の外形（b = [x0, y0, x1, y1]、単位は m）から辞書で判定する。
  * 器具のデータには外形しか無いので、判定に使う特徴は寸法だけ（円弧の割合・輪郭の閉じなどは null＝ゲートを通す）。
- * 戻り値: { verdict: "hit" | "near" | "unknown", category, score, short, long }（short/long は mm） */
-export function classifyBox(b) {
+ * userDict（自分の辞書：利用者が「これは何か」を教えた { name, short, long } の配列）が最優先。
+ *   寸法が実測パターンと同じ許容（±max(18mm, 5%)）で合えば、その名前で検出（mine: true）。
+ * 戻り値: { verdict: "hit" | "near" | "unknown", category, score, short, long, mine? }（short/long は mm） */
+export function classifyBox(b, userDict = []) {
   if (!b || b.length < 4) return { verdict: "unknown", category: null, score: 0, short: 0, long: 0 };
   const w = Math.abs(b[2] - b[0]) * 1000, h = Math.abs(b[3] - b[1]) * 1000;
   const short = Math.min(w, h), long = Math.max(w, h);
+  for (const u of userDict || []) {
+    if (!u || !u.name || !(u.short > 0) || !(u.long > 0)) continue;
+    const tolS = Math.max(18, u.short * 0.05), tolL = Math.max(18, u.long * 0.05);
+    if (Math.abs(short - u.short) <= tolS && Math.abs(long - u.long) <= tolL)
+      return { verdict: "hit", category: u.name, score: 1, short, long, mine: true };
+  }
   const r = classifySymbol({ short, long, arcShare: null, closed: null, innerClosed: null, dividers: null });
   if (r.result === "不明") return { verdict: "unknown", category: null, score: r.score, short, long };
   if (r.result === "要確認") return { verdict: "near", category: r.category, score: r.score, short, long };

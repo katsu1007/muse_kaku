@@ -77,3 +77,25 @@ test('3区分の色は互いに違う', () => {
   const cs = [SYM_VERDICTS.hit.color, SYM_VERDICTS.near.color, SYM_VERDICTS.unknown.color];
   assert.equal(new Set(cs).size, 3);
 });
+
+test('自分の辞書：登録した寸法と名前が最優先で検出になる（辞書に無い大きさでも）', () => {
+  const mine = [{ id: 'u1', name: '作業台', short: 900, long: 2000 }];
+  const r = classifyBox([0, 0, 2.0, 0.9], mine);
+  assert.equal(r.verdict, 'hit');
+  assert.equal(r.category, '作業台');
+  assert.equal(r.mine, true);
+});
+
+test('自分の辞書：寸法が許容（±5%）の内なら少し違っても検出、外なら通常の判定に戻る', () => {
+  const mine = [{ id: 'u1', name: '大便器', short: 398, long: 497 }];
+  assert.equal(classifyBox([0, 0, 0.41, 0.51], mine).category, '大便器');
+  const r = classifyBox([0, 0, 0.6, 0.9], mine);
+  assert.notEqual(r.category, '大便器');
+});
+
+test('自分の辞書：壊れた登録は無視する', () => {
+  const mine = [{ id: 'u2', name: '', short: 0, long: 0 }, null, { name: 'x' }];
+  const r = classifyBox([0, 0, 0.37, 0.42], mine);
+  assert.equal(r.category, '小便器');
+  assert.equal(r.mine, undefined);
+});
