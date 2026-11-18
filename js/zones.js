@@ -13,9 +13,60 @@ import { joinTexts, classify } from './reader2/text.js';
 const NOTE_RE = /^(壁|床|天井|巾木)\s*[:：]|^CH\s*[=＝:：]/i;
 const SKIP_NAMES = new Set(['事務所棟']);
 
-export function computeZones({ segs = [], faces = [], texts = [], doors = [] } = {}) {
+export function computeZones({ segs = [], faces = [], texts = [], doors = [], marks = null, fixtures = [] } = {}) {
   const F = (faces || []).filter(f => f && f.poly && f.poly.length >= 3);
   if (!F.length || !segs.length) return [];
+  /* 表・表題欄・図枠と確定した区画（reader2 の印で s:'out'）は、部屋の候補に入れない。
+   * 印が無い・保留（hold）の区画は今まで通り（分からない物を勝手に外さない） */
+  const excluded = new Set();
+  if (marks) for (const f of F) { const m = marks[f.i] || marks[String(f.i)]; if (m && m.s === 'out' && (m.type === 'table' || m.type === 'title' || m.type === 'frame')) excluded.add(f.i); }
+  /* 表のマス：小さな四角い区画が縦横そろって格子状に並んだ集まりは、表と見て候補に入れない。
+   * 器具・ドアのある区画（トイレのブース等）はマスにしない。1段・1列だけの並びは
+   * 部屋やロッカーの並びと区別できないので外さない。近くの集まり同士は1つの表としてまとめる */
+  {
+    const shoeZ = P => Math.abs(P.reduce((s, q, k) => { const n = P[(k + 1) % P.length]; return s + q[0] * n[1] - n[0] * q[1]; }, 0)) / 2;
+    const fxPts = (fixtures || []).filter(f => f && (f.b || f.cx != null)).map(f => f.b ? [(f.b[0] + f.b[2]) / 2, (f.b[1] + f.b[3]) / 2] : [f.cx, f.cy]);
+    const drPts = (doors || []).filter(d => d && d.c).map(d => d.c);
+    const infos = F.map(f => {
+      const xs = f.poly.map(q => q[0]), ys = f.poly.map(q => q[1]);
+      const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+      const w = x1 - x0, h = y1 - y0, pa = shoeZ(f.poly);
+      return { f, x0, y0, x1, y1, w, h, pa, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, fill: w * h > 0 ? pa / (w * h) : 0 };
+    });
+    const isCell = c => c.f.poly.length >= 4 && c.f.poly.length <= 6 && c.fill >= 0.9 && c.w <= 6 && c.h <= 3 && c.pa <= 15
+      && !fxPts.some(q => q[0] >= c.x0 && q[0] <= c.x1 && q[1] >= c.y0 && q[1] <= c.y1)
+      && !drPts.some(q => q[0] >= c.x0 - 0.3 && q[0] <= c.x1 + 0.3 && q[1] >= c.y0 - 0.3 && q[1] <= c.y1 + 0.3);
+    const cells = infos.filter(isCell);
+    const uf = new Map(cells.map(c => [c.f.i, c.f.i]));
+    const find = x => uf.get(x) === x ? x : (uf.set(x, find(uf.get(x))), uf.get(x));
+    for (let a = 0; a < cells.length; a++) for (let b = a + 1; b < cells.length; b++) {
+      const A = cells[a], B = cells[b];
+      const rowMate = Math.abs(A.cy - B.cy) <= 0.3 * Math.min(A.h, B.h) && Math.abs(A.cx - B.cx) <= (A.w + B.w) / 2 + 1.0;
+      const colMate = Math.abs(A.cx - B.cx) <= 0.3 * Math.min(A.w, B.w) && Math.abs(A.cy - B.cy) <= (A.h + B.h) / 2 + 1.0;
+      if (rowMate || colMate) { const ra = find(A.f.i), rb = find(B.f.i); if (ra !== rb) uf.set(rb, ra); }
+    }
+    const groups = new Map();
+    cells.forEach(c => { const r = find(c.f.i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(c); });
+    const gl = [...groups.values()].filter(g => g.length >= 3).map(g => ({ g, box: [Math.min(...g.map(c => c.x0)), Math.min(...g.map(c => c.y0)), Math.max(...g.map(c => c.x1)), Math.max(...g.map(c => c.y1))] }));
+    /* 近い集まり（1.5m以内）は1つの表としてまとめてから判定する */
+    const merged = [];
+    gl.forEach(o => {
+      const hit = merged.find(m => o.box[0] <= m.box[2] + 1.5 && o.box[2] >= m.box[0] - 1.5 && o.box[1] <= m.box[3] + 1.5 && o.box[3] >= m.box[1] - 1.5);
+      if (hit) { hit.g.push(...o.g); hit.box = [Math.min(hit.box[0], o.box[0]), Math.min(hit.box[1], o.box[1]), Math.max(hit.box[2], o.box[2]), Math.max(hit.box[3], o.box[3])]; }
+      else merged.push({ g: [...o.g], box: [...o.box] });
+    });
+    for (const m of merged) {
+      const rows = new Set(m.g.map(c => Math.round(c.cy * 2) / 2)).size, cols = new Set(m.g.map(c => Math.round(c.cx * 2) / 2)).size;
+      if (!(m.g.length >= 8 || (m.g.length >= 5 && rows >= 2 && cols >= 2))) continue;
+      m.g.forEach(c => excluded.add(c.f.i));
+      /* 表の外枠らしい区画（マスを5個以上含む四角）も一緒に入れない */
+      for (const c of infos) {
+        if (excluded.has(c.f.i) || c.fill < 0.9 || c.pa > 400) continue;
+        const inside = m.g.filter(q => q.cx >= c.x0 && q.cx <= c.x1 && q.cy >= c.y0 && q.cy <= c.y1).length;
+        if (inside >= 5) excluded.add(c.f.i);
+      }
+    }
+  }
 
   /* 1) 線を端点の近さで集まりに分け、家具サイズの集まりを壁から外す */
   const uf = new Int32Array(segs.length).map((_, i) => i);
@@ -108,7 +159,7 @@ export function computeZones({ segs = [], faces = [], texts = [], doors = [] } =
   const J = joinTexts(texts || []);
   const cellOf = (x, y) => { const cx = Math.floor((x - gx) / CS), cy = Math.floor((y - gy) / CS); return (cx < 0 || cx >= W || cy < 0 || cy >= H) ? -1 : label[cy * W + cx]; };
   const compFaces = new Map();
-  for (const f of F) { const c = cellOf(f.cx, f.cy); if (c >= 0) compFaces.set(c, (compFaces.get(c) || 0) + 1); }
+  for (const f of F) { if (excluded.has(f.i)) continue; const c = cellOf(f.cx, f.cy); if (c >= 0) compFaces.set(c, (compFaces.get(c) || 0) + 1); }
   const roomSeeds = new Map(), noteSeeds = new Map();
   for (const t of J.texts) {
     const c = cellOf(t.x, t.y); if (c < 0) continue;
@@ -205,6 +256,7 @@ export function computeZones({ segs = [], faces = [], texts = [], doors = [] } =
   const pip = (x, y, P) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const a = P[i], b = P[j]; if ((a[1] > y) !== (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]) c = !c; } return c; };
   const faceZone = new Map();
   for (const f of F) {
+    if (excluded.has(f.i)) continue;
     if (f.area != null && f.area > 200) continue;
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
     f.poly.forEach(q => { x0 = Math.min(x0, q[0]); y0 = Math.min(y0, q[1]); x1 = Math.max(x1, q[0]); y1 = Math.max(y1, q[1]); });
@@ -227,7 +279,7 @@ export function computeZones({ segs = [], faces = [], texts = [], doors = [] } =
   const byI = new Map(F.map(f => [f.i, f]));
   const anchors = [...faceZone.entries()];
   for (const f of F) {
-    if (faceZone.has(f.i)) continue;
+    if (faceZone.has(f.i) || excluded.has(f.i)) continue;
     if (f.area != null && f.area > 10) continue;
     let bz = -1, bd = 2.5;
     for (const [ai, az] of anchors) {

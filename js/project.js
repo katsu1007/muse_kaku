@@ -1329,11 +1329,12 @@ function stepRooms(ctx) {
         p.drawing = { fileName: (cad ? [cad] : files).map(f => f.name).join('、'), at: Date.now(), plan: res.plan, fixtures: cad ? res.fixtures : null, open: cad ? res.open : null, doors: cad ? (res.doorList || []) : [], fixG: cad ? res.fixG : '', fixGd: cad ? res.fixGd : '' };
         /* 机・椅子などの家具：線の集まりから形の候補を切り出して覚える（判定はシンボル辞書。器具・見積の数字は変えない） */
         if (cad) { try { p.drawing.furn = detectFurniture(res.plan.segs || [], res.fixtures || [], res.doorList || []); } catch (e2) { console.warn('家具の検出に失敗', e2); p.drawing.furn = []; } }
-        if (cad) { try { p.drawing.zones = computeZones({ segs: res.plan.segs || [], faces: res.plan.faces || [], texts: res.texts || [], doors: res.doorList || [] }).map(z => ({ id: uid('z'), fixed: false, ...z })); } catch (e2) { console.warn('ゾーン分けに失敗', e2); p.drawing.zones = []; } }
         /* 新しい読み取り（js/reader2）：図枠・表の印を作って覚えておく。今の読み取りの結果（区画・器具）は変えない。画面に出すのは「新しい読み取り」を選んだ時だけ */
         /* 解析を後で作り直せるように、文字・長い線・ドアを覚えておく（解析の作りを直した時、開いただけで新しい解析になる） */
         if (cad) p.drawing.src2 = { texts: res.texts || [], segs: res.longSegs && res.longSegs.length ? res.longSegs : [], doors: res.doorList || [] };
         if (cad) { try { p.drawing.analysis = analyzeFrame({ segs: res.longSegs && res.longSegs.length ? res.longSegs : res.plan.segs, faces: res.plan.faces, texts: res.texts || [], fixtures: res.fixtures || [], doors: res.doorList || [] }); } catch (e2) { console.warn('新しい読み取りの解析に失敗', e2); } }
+        /* ゾーン分けは解析の後（表・表題欄・図枠と確定した区画を候補に入れないため、印を渡す） */
+        if (cad) { try { p.drawing.zones = computeZones({ segs: res.plan.segs || [], faces: res.plan.faces || [], texts: res.texts || [], doors: res.doorList || [], marks: (p.drawing.analysis && p.drawing.analysis.marks) || null, fixtures: res.fixtures || [] }).map(z => ({ id: uid('z'), fixed: false, ...z })); } catch (e2) { console.warn('ゾーン分けに失敗', e2); p.drawing.zones = []; } }
         if (cad && res.v2) { try { const P2 = { faces: res.v2.faces }; orderFacesOf(P2);
           /* 扉の無い開口は「区画の辺に壁の線が無い所」で決めるので、区画の形が壁の線に沿っていないと、辺のほとんどが開口になる。
            * 開口が周りの3割以上になる区画は、形が合っていないと見て、扉の無い開口を引かない（分からない物を引かない。ドアは残す） */
@@ -1451,7 +1452,7 @@ function stepRooms(ctx) {
         const fixed = Z.filter(z => z.fixed);
         const usedF = new Set(fixed.flatMap(z => z.faces));
         try {
-          const fresh = computeZones({ segs: d.plan.segs || [], faces: d.plan.faces || [], texts: (d.src2 && d.src2.texts) || [], doors: d.doors || [] })
+          const fresh = computeZones({ segs: d.plan.segs || [], faces: d.plan.faces || [], texts: (d.src2 && d.src2.texts) || [], doors: d.doors || [], marks: (d.analysis && d.analysis.marks) || null, fixtures: d.fixtures || [] })
             .map(z => ({ ...z, faces: z.faces.filter(i => !usedF.has(i)) }))
             .filter(z => z.faces.length || z.area >= 20)
             .map(z => ({ id: uid('z'), fixed: false, ...z }));

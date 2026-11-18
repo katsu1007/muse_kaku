@@ -105,3 +105,40 @@ test('データが無ければ空', () => {
   assert.deepEqual(computeZones({}), []);
   assert.deepEqual(computeZones({ segs: [], faces: [] }), []);
 });
+
+test('表のマス（四角が格子状に並んだ集まり）はゾーンに入らない', () => {
+  const rm = room(0, 0, 5, 4);
+  const segs = [...rm.segs], faces = [F(1, rm.face)];
+  let i = 10;
+  /* 部屋の横に 4列×3段の表（マス 1.2×0.8） */
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) {
+    const cell = room(8 + c * 1.2, r * 0.8, 1.2, 0.8);
+    segs.push(...cell.segs); faces.push(F(i++, cell.face));
+  }
+  const zones = computeZones({ segs, faces, texts: [{ t: '会議室', x: 2.5, y: 2 }], doors: [] });
+  const used = new Set(); zones.forEach(z => z.faces.forEach(f => used.add(f)));
+  assert.ok(used.has(1), '部屋はゾーンに入る');
+  for (let k = 10; k < i; k++) assert.ok(!used.has(k), `表のマス ${k} がゾーンに入ってしまった`);
+});
+
+test('器具のある小部屋の並び（ブース）は表と見ない', () => {
+  /* 大きな部屋の上壁に、端点がつながる形で 3列×2段のブース（1.5×2.4）を付ける。各ブースに器具とドアがある */
+  const segs = [], faces = [], fixtures = [], doors = [];
+  const W = 1.5, H = 2.4, xs = [0.6, 0.6 + W, 0.6 + 2 * W, 0.6 + 3 * W], top = 8, mid = top - H, bot = top - 2 * H;
+  segs.push([0, 0, 10, 0], [10, 0, 10, top], [0, top, 0, 0], [0, top, xs[0], top], [xs[3], top, 10, top]);
+  xs.slice(0, 3).forEach((x, k) => segs.push([x, top, xs[k + 1], top], [x, top, x, mid], [xs[k + 1], top, xs[k + 1], mid], [x, mid, xs[k + 1], mid]));
+  xs.slice(0, 3).forEach((x, k) => segs.push([x, mid, xs[k + 1], mid], [x, mid, x, bot], [xs[k + 1], mid, xs[k + 1], bot], [x, bot, xs[k + 1], bot]));
+  faces.push(F(1, { poly: [[0, 0], [10, 0], [10, top], [0, top]], cx: 5, cy: 1.5 }));
+  let i = 10;
+  for (let r = 0; r < 2; r++) for (let c = 0; c < 3; c++) {
+    const x = xs[c], y = r === 0 ? mid : bot;
+    faces.push(F(i, { poly: [[x, y], [x + W, y], [x + W, y + H], [x, y + H]], cx: x + W / 2, cy: y + H / 2 }));
+    fixtures.push({ b: [x + 0.3, y + 0.7, x + 1.2, y + 1.8] });
+    doors.push({ c: [x + W / 2, y + 0.1], m: [x + W - 0.2, y + 1.0] });
+    i++;
+  }
+  const zones = computeZones({ segs, faces, texts: [{ t: 'トイレ', x: 2.85, y: 6.8 }], doors, fixtures });
+  const used = new Set(); zones.forEach(z => z.faces.forEach(f => used.add(f)));
+  let booths = 0; for (let k = 10; k < i; k++) if (used.has(k)) booths++;
+  assert.ok(booths >= 4, `ブースがゾーンから外れてしまった（入ったのは ${booths} 件）`);
+});
