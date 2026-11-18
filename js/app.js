@@ -1,0 +1,257 @@
+/* 起動・画面の切り替え・保存のまとめ役 */
+import * as store from './store.js';
+import * as sync from './sync.js';
+import * as undoer from './undo.js';
+import { DEFAULTS } from './calc.js';
+import { BUILTIN_ITEMS, CATEGORIES } from './master-data.js';
+import { icon, esc, toast, showError, $ } from './ui.js';
+
+export const APP_VERSION = '2.0.0';
+export const APP_DATE = '2026-11-12';
+
+export const state = {
+  projects: [],
+  settings: {},
+  company: {},
+  priceOverrides: {},
+  customItems: [],
+  route: { name: 'home' }
+};
+
+const SETTINGS0 = { theme: 'dark', ...DEFAULTS, overheadPct: 0, profitPct: 0, greeting: '' };
+
+/* 計算に渡す設定（掛け率・ロス率など） */
+export const opts = () => ({ ...DEFAULTS, ...pick(state.settings, Object.keys(DEFAULTS)) });
+const pick = (o, ks) => Object.fromEntries(ks.filter(k => o[k] !== '' && o[k] != null).map(k => [k, Number(o[k])]));
+
+/* 単価マスター（最初からある品目＋自分で足した品目、単価の変更を反映） */
+export function masterItems() {
+  return [
+    ...BUILTIN_ITEMS.map(i => (state.priceOverrides[i.id] != null ? { ...i, price: Number(state.priceOverrides[i.id]), changed: true } : i)),
+    ...state.customItems.map(i => ({ ...i, custom: true }))
+  ];
+}
+export const categories = () => [...CATEGORIES, ...(state.customItems.length ? [['custom', '自分で足した品目']] : [])];
+
+/* ---------- 保存（打っている間はまとめて、0.4秒止まったら保存） ---------- */
+const pending = new Map();
+let saveTimer = null;
+export function touch(p) {
+  p.updatedAt = Date.now();
+  pending.set(p.id, p);
+  paintUndo();
+  setSave('busy');
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(flush, 400);
+}
+/* 保存は1つずつ順に（前の書き込みが終わる前に次を始めない）。ほかのタブで同じ案件が新しくなっていたら上書きしない */
+const known = store.known;   // 案件 id → この画面が最後に読んだ・書いた時の updatedAt（store.js が覚える）
+let inflight = Promise.resolve(), retryT = null;
+const bc = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('muse-kaku') : null;
+export function flush() { inflight = inflight.then(flush0, flush0); return inflight; }
+async function flush0() {
+  clearTimeout(saveTimer);
+  const list = [...pending.values()];
+  pending.clear();
+  if (!list.length) { if (!saveTimer) setSave('ok'); return; }
+  try {
+    const done = [];
+    for (const p of list) {
+      const r = await store.putProjectIf(p);
+      if (r === 'conflict') { toast(`「${p.name || '案件'}」は別のタブ（画面）で変わっているので、ここでの変更は保存しませんでした。画面を読み直してください`, { bad: true, ms: 10000, action: '読み直す', onAction: () => location.reload() }); continue; }
+      done.push(p);
+      if (bc) try { bc.postMessage({ id: p.id, u: p.updatedAt }); } catch (e) {}
+    }
+    done.forEach(p => undoer.commit(p));
+    paintUndo();
+    setSave(pending.size ? 'busy' : done.length === list.length ? 'ok' : 'bad');   // 書いている間に次の変更が来ていたら「保存しています」のまま
+    sync.autoSave(done, opts());
+  } catch (e) {
+    list.forEach(p => { if (!pending.has(p.id)) pending.set(p.id, p); });
+    setSave('bad', e.message);
+    toast(e.message, { bad: true });
+    clearTimeout(retryT); retryT = setTimeout(() => { if (pending.size) flush(); }, 4000);   // 1回だけ、少し待って自動でもう一度
+  }
+}
+if (bc) bc.onmessage = e => { const m = e.data || {}; const r = state.route;
+  if (r && r.name === 'project' && r.id === m.id && (known.get(m.id) || 0) < m.u) toast('この案件が別のタブ（画面）で変わりました。読み直すと新しい中身になります', { ms: 10000, action: '読み直す', onAction: () => location.reload() }); };
+window.addEventListener('pagehide', flush);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
+
+/* ---------- 案件全体の「元に戻す」「やり直す」（js/undo.js。保存のたびに変わる前を控える） ---------- */
+export const trackUndo = p => { undoer.track(p); };
+export const rebaseUndo = p => { undoer.rebase(p); };
+export const resetUndo = p => { undoer.reset(p); paintUndo(); };
+export function paintUndo() {
+  const r = state.route, id = r && r.name === 'project' ? r.id : null;
+  const u = document.getElementById('undoBtn'), d = document.getElementById('redoBtn');
+  if (u) u.disabled = !(id && (undoer.canUndo(id) || pending.has(id)));
+  if (d) d.disabled = !(id && undoer.canRedo(id));
+}
+export async function stepUndo(p, back) {
+  clearTimeout(saveTimer);
+  const ok = back ? undoer.undo(p) : undoer.redo(p);
+  if (!ok) { paintUndo(); toast(back ? 'これより前には戻せません' : 'やり直す物がありません'); return false; }
+  p.updatedAt = Date.now();
+  pending.set(p.id, p);
+  await flush();
+  state.keepScroll = true;
+  await render();
+  toast(back ? '1つ前に戻しました' : 'やり直しました', { ms: 1800 });
+  return true;
+}
+
+let saveNow = { kind: 'ok', msg: '', at: null };   // 画面を作り直しても、保存の状態をそのまま出す（前は作り直すたびに「保存しました」に戻っていた）
+function setSave(kind, msg) {
+  saveNow = { kind, msg: msg || '', at: kind === 'ok' ? new Date() : saveNow.at };
+  paintSave();
+}
+function paintSave() {
+  const { kind, msg } = saveNow;
+  const el = document.getElementById('savestate');
+  if (!el) return;
+  el.className = 'savestate ' + (kind === 'ok' ? '' : kind);
+  const d = saveNow.at || new Date();
+  el.innerHTML = `<i></i>${kind === 'busy' ? '保存しています' : kind === 'bad' ? '保存できませんでした' : `保存しました ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`}`;
+  el.title = msg || '';
+}
+
+let compT = null;
+const companySoon = () => { clearTimeout(compT); compT = setTimeout(() => sync.autoCompany(), 2000); };
+export async function saveSettings() {
+  try { await store.setKV('settings', state.settings); companySoon(); }
+  catch (e) { toast(e.message, { bad: true }); }
+}
+export async function saveKV(key, val) {
+  try { await store.setKV(key, val); if (['company', 'priceOverrides', 'customItems'].includes(key)) companySoon(); }
+  catch (e) { toast(e.message, { bad: true }); throw e; }
+}
+
+export function applyTheme() {
+  document.documentElement.dataset.theme = state.settings.theme === 'light' ? 'light' : 'dark';
+  try { localStorage.setItem('kaku2-theme', document.documentElement.dataset.theme); } catch (e) { /* 表示の記憶だけなので、できなくても動く */ }
+  const m = document.querySelector('meta[name="theme-color"]');
+  if (m) m.content = state.settings.theme === 'light' ? '#f3f4f6' : '#0c1016';
+}
+
+/* ---------- 画面の切り替え（#/ … のハッシュで） ---------- */
+export function go(hash) { if (location.hash === hash) render(); else location.hash = hash; }
+function parse() {
+  const h = location.hash.replace(/^#\/?/, '').split('/');
+  if (h[0] === 'p' && h[1]) return { name: 'project', id: decodeURIComponent(h[1]), step: Number(h[2]) || 1 };
+  if (h[0] === 'projects') return { name: 'projects' };
+  if (h[0] === 'master') return { name: 'master' };
+  if (h[0] === 'settings') return { name: 'settings' };
+  if (h[0] === 'help') return { name: 'help' };
+  return { name: 'home' };
+}
+
+const views = {};
+export function registerView(name, fn) { views[name] = fn; }
+
+const NAV = [
+  ['home', '#/', 'home', 'ホーム'],
+  ['projects', '#/projects', 'folder', '案件'],
+  ['master', '#/master', 'tag', '単価マスター'],
+  ['settings', '#/settings', 'gear', '設定']
+];
+
+function shell() {
+  const r = state.route.name === 'project' ? 'projects' : state.route.name;
+  $('#side').innerHTML = `
+    <div class="brand"><div class="logo">K</div><div><b>KAKU</b><small>見積もりワークスペース</small></div></div>
+    ${NAV.map(([k, h, ic, t]) => `<a class="nav ${r === k ? 'on' : ''}" href="${h}">${icon(ic)}${t}</a>`).join('')}
+    <div class="sep"></div>
+    <div class="lab">前のKAKU</div>
+    <a class="nav" href="./old/index.html" title="照明・器具・3Dは新しい画面の「図面」に移りました。前の画面は、前に作った案件を見る時だけ使います">${icon('layers')}前の画面（見るだけ）</a>
+    <a class="nav ${r === 'help' ? 'on' : ''}" href="#/help">${icon('help')}使い方</a>
+    <div class="foot">KAKU ${APP_VERSION}（${APP_DATE}）</div>`;
+  $('#bottom').innerHTML = NAV.map(([k, h, ic, t]) => `<a class="${r === k ? 'on' : ''}" href="${h}">${icon(ic)}${t === '単価マスター' ? '単価' : t}</a>`).join('');
+}
+
+export function setTop(title, right = '') {
+  $('#top').innerHTML = `<h1>${esc(title)}</h1><span id="savestate" class="savestate"><i></i>保存しました</span>${right}
+    <button class="iconbtn" id="themeBtn" aria-label="明るさの切り替え" title="暗い表示／明るい表示">${icon(state.settings.theme === 'light' ? 'moon' : 'sun')}</button>`;
+  paintSave();
+  $('#themeBtn').onclick = () => {
+    state.settings.theme = state.settings.theme === 'light' ? 'dark' : 'light';
+    applyTheme(); saveSettings(); setTop(title, right);
+  };
+}
+
+export async function render() {
+  state.route = parse();
+  shell();
+  const v = views[state.route.name] || views.home;
+  const el = $('#view');
+  try {
+    await v(el, state.route);
+  } catch (e) {
+    console.error(e);
+    el.innerHTML = `<div class="card"><h2>画面を表示できませんでした</h2><p class="muted">${esc(e.message)}</p><a class="btn" href="#/">ホームに戻る</a></div>`;
+    showError('画面の表示でエラーが起きました：' + e.message);
+  }
+  if (!state.route.keepScroll && !state.keepScroll) window.scrollTo(0, 0);
+  state.keepScroll = false;
+}
+
+export function findProject(id) { return state.projects.find(p => p.id === id); }
+
+export function newProject(extra = {}) {
+  const now = Date.now();
+  const p = {
+    id: store.uid('p'), name: '', customer: '', address: '', person: '', tel: '',
+    number: nextNumber(), expiry: '発行日より30日', issueDate: '',
+    overheadPct: state.settings.overheadPct || 0, profitPct: state.settings.profitPct || 0, discount: 0, taxRate: '',
+    status: 'draft', rooms: [], lines: [], history: [], memo: '', note: '',
+    createdAt: now, updatedAt: now, ...extra
+  };
+  state.projects.unshift(p);
+  touch(p);
+  return p;
+}
+function nextNumber() {
+  const d = new Date();
+  const base = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const n = state.projects.filter(p => String(p.number || '').startsWith(base)).length + 1;
+  return `${base}-${String(n).padStart(3, '0')}`;
+}
+
+export async function removeProject(p) {
+  state.projects = state.projects.filter(x => x.id !== p.id);
+  pending.delete(p.id);
+  undoer.forget(p.id);
+  await store.deleteProject(p.id);
+}
+export async function restoreProject(p) {
+  state.projects.unshift(p);
+  await store.putProject(p);
+}
+
+export async function reload() {
+  state.projects = (await store.listProjects()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  state.settings = { ...SETTINGS0, ...(await store.getKV('settings', {})) };
+  state.company = await store.getKV('company', {});
+  state.priceOverrides = await store.getKV('priceOverrides', {});
+  state.customItems = await store.getKV('customItems', []);
+}
+
+export async function boot() {
+  window.addEventListener('error', e => showError('エラーが起きました：' + (e.message || e.error)));
+  window.addEventListener('unhandledrejection', e => showError('エラーが起きました：' + (e.reason && e.reason.message || e.reason)));
+  try {
+    const back = await store.restoreFromApp();
+    const moved = back ? 0 : await store.migrateOnce();
+    await reload();
+    if (back) toast(`アプリに残っていた案件を ${back} 件戻しました`);
+    applyTheme();
+    if (moved) toast(`前のKAKUの案件を ${moved} 件引き継ぎました`);
+    store.persist().then(ok => { state.persisted = ok; });
+  } catch (e) {
+    showError(e.message);
+    state.settings = { ...SETTINGS0 };
+    applyTheme();
+  }
+  window.addEventListener('hashchange', render);
+  await render();
+}
