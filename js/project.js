@@ -14,7 +14,7 @@ import { classifyBox, classifyCluster, SYM_VERDICTS, SYM_DICT } from './symdict.
 import { detectFurniture } from './furndetect.js';
 import { judgeRooms, ROOM_JUDGE } from './roomjudge.js';
 import { computeZones, splitFacesByLine } from './zones.js';
-import { extractDxfDims } from './dxf-dims.js';
+import { extractDxfDims, checkDimensions } from './dxf-dims.js';
 import { USES, DEF_LM, needCount, pitchFor, luxOf, wirePlan, cableQty, pip, polyD } from './lighting.js';
 /* iPhone・iPad では、選べるファイルの種類を絞ると .jww・.jwc・.dxf が灰色になって選べない（iPhone がこの拡張子を知らないため）。
    なので iPhone・iPad では絞らない。何を選んでも、読み込む時に拡張子で見分けるので困らない */
@@ -508,13 +508,32 @@ function zoneSummary(d, selId = '') {
 /* 図面の寸法（DXF から別に拾った物。エンジンは寸法を拾わないので、読み込みの時に
  * js/dxf-dims.js で抜いて d.dims に覚えている。表示だけで、区画・部屋・見積には使わない。
  * 古い保存には dims が無いので、その時は出さない） */
+/* 倍率の表示（有効数字3桁まで。50.0 → 50、0.0200 → 0.02） */
+const fmtFactor = v => String(Number(v.toPrecision(3)));
 function dimSummary(d) {
   const dims = (d && d.dims) || [];
   if (!dims.length) return '';
   const chips = dims.slice(0, 60).map(x => `<span class="pill">${esc(x.text)}</span>`).join('');
+  /* 寸法の答え合わせ（読み込み時に集計した d.dimCheck。表示だけで、縮尺を自動で直すことはしない。
+   * 古い保存には dimCheck が無いので、その時は寸法の一覧だけ出す） */
+  let check = '';
+  const chk = d && d.dimCheck;
+  if (chk && chk.n >= 1 && typeof chk.median === 'number') {
+    const outliers = chk.outliers || [], edited = chk.edited || [];
+    if (Math.abs(chk.median - 1) > 0.01) {
+      check += `<div class="small" style="margin-top:6px;color:var(--warn)">寸法と図形の比率が約${fmtFactor(chk.median)}倍です。用紙mmの図面かもしれません（自動では直しません）</div>`;
+    } else if (!outliers.length) {
+      check += `<div class="small muted" style="margin-top:6px">寸法で縮尺を確認済み（${chk.n}件で照合）</div>`;
+    }
+    const flagged = [...outliers, ...edited.filter(x => !outliers.includes(x))];
+    if (flagged.length) {
+      const fchips = flagged.slice(0, 60).map(x => `<span class="pill warn">${esc(x.text)}</span>`).join('');
+      check += `<div class="row" style="gap:6px;margin-top:8px"><b class="small">要確認の寸法</b>${fchips}${flagged.length > 60 ? `<span class="small muted">ほか ${flagged.length - 60} 件</span>` : ''}</div>`;
+    }
+  }
   return `<div class="row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)"><b class="small">寸法</b>
     <span class="pill info">${dims.length}件</span>
-    <span class="small muted">図面に書かれていた寸法です（mm）。見積には入りません</span></div>
+    <span class="small muted">図面に書かれていた寸法です（mm）。見積には入りません</span></div>${check}
     <div class="row" style="gap:6px;margin-top:8px">${chips}${dims.length > 60 ? `<span class="small muted">ほか ${dims.length - 60} 件</span>` : ''}</div>`;
 }
 
@@ -1343,8 +1362,11 @@ function stepRooms(ctx) {
         /* DXF の寸法はエンジンが拾わないので、同じファイルから別に抜いて覚える（表示だけ。区画・器具・見積には使わない）。JWW は寸法が線と文字で出るので空のまま */
         let dims = [];
         if (cad && /\.dxf$/i.test(cad.name)) { try { dims = extractDxfDims(await cad.arrayBuffer()); } catch (e2) { console.warn('寸法の読み取りに失敗', e2); } }
+        /* 寸法の答え合わせ（寸法の値と図形の距離の比率）。これも表示だけ：縮尺を自動で直すことはしない */
+        let dimCheck = null;
+        if (dims.length) { try { dimCheck = checkDimensions(dims); } catch (e2) { console.warn('寸法の答え合わせに失敗', e2); } }
         p.rooms.forEach(r => { if (r.src === 'plan') { r.src = 'plan-old'; delete r.faces; } });
-        p.drawing = { fileName: (cad ? [cad] : files).map(f => f.name).join('、'), at: Date.now(), plan: res.plan, fixtures: cad ? res.fixtures : null, open: cad ? res.open : null, doors: cad ? (res.doorList || []) : [], fixG: cad ? res.fixG : '', fixGd: cad ? res.fixGd : '', dims };
+        p.drawing = { fileName: (cad ? [cad] : files).map(f => f.name).join('、'), at: Date.now(), plan: res.plan, fixtures: cad ? res.fixtures : null, open: cad ? res.open : null, doors: cad ? (res.doorList || []) : [], fixG: cad ? res.fixG : '', fixGd: cad ? res.fixGd : '', dims, dimCheck };
         /* 机・椅子などの家具：線の集まりから形の候補を切り出して覚える（判定はシンボル辞書。器具・見積の数字は変えない） */
         if (cad) { try { p.drawing.furn = detectFurniture(res.plan.segs || [], res.fixtures || [], res.doorList || []); } catch (e2) { console.warn('家具の検出に失敗', e2); p.drawing.furn = []; } }
         /* 新しい読み取り（js/reader2）：図枠・表の印を作って覚えておく。今の読み取りの結果（区画・器具）は変えない。画面に出すのは「新しい読み取り」を選んだ時だけ */

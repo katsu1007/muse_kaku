@@ -2,7 +2,7 @@
  * 実測値（42）・定義点からの計算・表示文字・拾う範囲（ENTITIES だけ）を確かめる */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractDxfDims } from '../js/dxf-dims.js';
+import { extractDxfDims, checkDimensions } from '../js/dxf-dims.js';
 
 /* コードと値の組から DXF 文字列を作る */
 const build = pairs => pairs.map(([c, v]) => `${c}\n${v}`).join('\n') + '\n';
@@ -17,7 +17,14 @@ const LINEAR = { 2: '*D1', 10: 500, 20: 600, 11: 123.4, 21: 567.8, 70: 32, 1: ''
 test('実測値（42）があればそれを使い、表示文字の上書きと文字位置を返す', () => {
   const dims = extractDxfDims(dxfOf([dim({ ...LINEAR, 42: 1500.5, 1: '1500' })]));
   assert.equal(dims.length, 1);
-  assert.deepEqual(dims[0], { type: 'linear', value: 1500.5, text: '1500', x: 123.4, y: 567.8 });
+  assert.deepEqual(dims[0], { type: 'linear', value: 1500.5, text: '1500', x: 123.4, y: 567.8, p1: { x: 0, y: 0 }, p2: { x: 3000, y: 0 }, angle: 0 });
+});
+
+test('定義点（13/23・14/24）と角度（50）も返す。無い時は p1/p2 が null、angle が undefined', () => {
+  const dims = extractDxfDims(dxfOf([dim({ 2: '*D1', 10: 0, 20: 0, 11: 0, 21: 0, 70: 32, 1: '', 42: 1000 })]));
+  assert.equal(dims[0].p1, null);
+  assert.equal(dims[0].p2, null);
+  assert.equal(dims[0].angle, undefined);
 });
 
 test('42 が -1（未記録）なら定義点から求める：寸法線方向への射影', () => {
@@ -88,4 +95,75 @@ test('ArrayBuffer でも文字列でも同じ結果（バイト列は UTF-8→Sh
 test('寸法が無い・読めない入力は []', () => {
   assert.deepEqual(extractDxfDims(''), []);
   assert.deepEqual(extractDxfDims(dxfOf([[[0, 'LINE'], [10, 0], [20, 0], [11, 100], [21, 100]]])), []);
+});
+
+/* ---- 寸法の答え合わせ（checkDimensions） ---- */
+
+/* 原点 (0,0) から (x2,y2) への線形寸法。角度は寸法線の向きに合わせる */
+const linDim = (x2, y2, g = {}) => dim({ 2: '*D1', 10: 0, 20: 0, 11: 0, 21: 0, 70: 32, 1: '', 13: 0, 23: 0, 14: x2, 24: y2, 50: 0, ...g });
+/* 揃った3件：横1000（角度0）・縦2000（角度90）・斜め5000（平行寸法、角度なし） */
+const consistentDxf = () => dxfOf([
+  linDim(1000, 0, { 42: 1000 }),
+  linDim(0, 2000, { 42: 2000, 50: 90 }),
+  dim({ 2: '*D1', 10: 0, 20: 0, 11: 0, 21: 0, 70: 33, 1: '', 13: 0, 23: 0, 14: 3000, 24: 4000, 42: 5000 }),
+]);
+
+test('答え合わせ：揃った寸法は中央値が約1で、外れ値なし', () => {
+  const chk = checkDimensions(extractDxfDims(consistentDxf()));
+  assert.equal(chk.n, 3);
+  assert.ok(Math.abs(chk.median - 1) < 1e-9);
+  assert.deepEqual(chk.outliers, []);
+  assert.deepEqual(chk.edited, []);
+});
+
+test('答え合わせ：一様に50倍の寸法は中央値が約50（用紙mmの疑い）', () => {
+  const dims = extractDxfDims(dxfOf([
+    linDim(1000, 0, { 42: 50000 }),
+    linDim(0, 2000, { 42: 100000, 50: 90 }),
+    linDim(500, 0, { 42: 25000 }),
+  ]));
+  const chk = checkDimensions(dims);
+  assert.equal(chk.n, 3);
+  assert.ok(Math.abs(chk.median - 50) < 1e-9);
+  assert.deepEqual(chk.outliers, []); /* 全部が同じ倍率なら、外れ値ではなく全体の係数 */
+});
+
+test('答え合わせ：1件だけ比率が違う寸法は外れ値として挙がる', () => {
+  const dims = extractDxfDims(dxfOf([
+    linDim(1000, 0, { 42: 1000 }),
+    linDim(0, 2000, { 42: 2000, 50: 90 }),
+    linDim(500, 0, { 42: 500 }),
+    linDim(1000, 0, { 42: 2000 }), /* これだけ2倍 */
+  ]));
+  const chk = checkDimensions(dims);
+  assert.equal(chk.n, 4);
+  assert.ok(Math.abs(chk.median - 1) < 1e-9);
+  assert.equal(chk.outliers.length, 1);
+  assert.equal(chk.outliers[0].value, 2000);
+});
+
+test('答え合わせ：表示文字が実測値と大きく違う寸法は「書き換え疑い」として挙がる', () => {
+  const dims = extractDxfDims(dxfOf([
+    linDim(1500, 0, { 42: 1500, 1: '2000' }), /* 文字だけ 2000 に書き換えられた */
+    linDim(1500, 0, { 42: 1500.4, 1: '1500' }), /* 整数への丸め（差0.4）は正常 */
+    linDim(800, 0, { 42: 800 }), /* 文字は実測値から自動生成 */
+  ]));
+  const chk = checkDimensions(dims);
+  assert.equal(chk.edited.length, 1);
+  assert.equal(chk.edited[0].text, '2000');
+  assert.deepEqual(chk.outliers, []); /* 比率はどれも1 */
+});
+
+test('答え合わせ：定義点の無い寸法は件数に入らない', () => {
+  const noPt = dim({ 2: '*D1', 10: 0, 20: 0, 11: 0, 21: 0, 70: 32, 1: '1000', 42: 1000 });
+  const only = checkDimensions(extractDxfDims(dxfOf([noPt])));
+  assert.equal(only.n, 0);
+  assert.equal(only.median, null);
+  const mixed = checkDimensions(extractDxfDims(dxfOf([noPt, linDim(1000, 0, { 42: 1000 })])));
+  assert.equal(mixed.n, 1);
+  assert.ok(Math.abs(mixed.median - 1) < 1e-9);
+});
+
+test('答え合わせ：寸法が無ければ n=0・median=null', () => {
+  assert.deepEqual(checkDimensions([]), { n: 0, median: null, outliers: [], edited: [] });
 });
