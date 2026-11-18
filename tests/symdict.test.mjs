@@ -99,3 +99,19 @@ test('自分の辞書：壊れた登録は無視する', () => {
   assert.equal(r.category, '小便器');
   assert.equal(r.mine, undefined);
 });
+
+test('CC0実測：浴槽（750×1700・円弧0.25・内側の閉曲線あり）は浴槽', () => {
+  const r = classifySymbol({ short: 750, long: 1700, arcShare: 0.25, closed: true, innerClosed: true, dividers: null });
+  assert.equal(r.result, '浴槽');
+});
+
+test('CC0実測：シャワートレー（900×900）は外形だけでも検出', () => {
+  const r = classifyBox([0, 0, 0.9, 0.9]);
+  assert.equal(r.verdict, 'hit');
+  assert.equal(r.category, 'シャワー');
+});
+
+test('同寸法が複数カテゴリにある形（550×600）は確定せず類似', () => {
+  const r = classifyBox([0, 0, 0.55, 0.6]);
+  assert.equal(r.verdict, 'near');
+});
