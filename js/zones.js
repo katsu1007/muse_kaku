@@ -13,6 +13,93 @@ import { joinTexts, classify } from './reader2/text.js';
 const NOTE_RE = /^(壁|床|天井|巾木)\s*[:：]|^CH\s*[=＝:：]/i;
 const SKIP_NAMES = new Set(['事務所棟']);
 
+/* 表・ラベル帯の検出（zones の候補から外すために作った物を、範囲としても返す）。
+ * 区画の並び（格子状のマス・材料名だけの大きな四角・表の見出しのある四角）から表の範囲を見つけ、
+ * 当てはまる区画の番号を excluded に足し、表の範囲（[x0,y0,x1,y1]）を boxes に集める。
+ * boxes は、線から作る補足区画（js/polygonize.js）が表・ラベル帯の中の輪を拾わないために使う。
+ * 引数：faces（poly を持つ区画）、texts、fixtures、doors、excluded（最初から外す区画。無ければ空）。
+ * 戻り値：{ excluded, boxes }（excluded は渡した Set そのものに足して返す） */
+export function detectTableAreas({ faces = [], texts = [], fixtures = [], doors = [], excluded = new Set() } = {}) {
+  const F = (faces || []).filter(f => f && f.poly && f.poly.length >= 3);
+const boxes = [];
+/* 表のマス：小さな四角い区画が縦横そろって格子状に並んだ集まりは、表と見て候補に入れない。
+ * 器具・ドアのある区画（トイレのブース等）はマスにしない。1段・1列だけの並びは
+ * 部屋やロッカーの並びと区別できないので外さない。近くの集まり同士は1つの表としてまとめる */
+{
+  const shoeZ = P => Math.abs(P.reduce((s, q, k) => { const n = P[(k + 1) % P.length]; return s + q[0] * n[1] - n[0] * q[1]; }, 0)) / 2;
+  const fxPts = (fixtures || []).filter(f => f && (f.b || f.cx != null)).map(f => f.b ? [(f.b[0] + f.b[2]) / 2, (f.b[1] + f.b[3]) / 2] : [f.cx, f.cy]);
+  const drPts = (doors || []).filter(d => d && d.c).map(d => d.c);
+  const infos = F.map(f => {
+    const xs = f.poly.map(q => q[0]), ys = f.poly.map(q => q[1]);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const w = x1 - x0, h = y1 - y0, pa = shoeZ(f.poly);
+    return { f, x0, y0, x1, y1, w, h, pa, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, fill: w * h > 0 ? pa / (w * h) : 0 };
+  });
+  const isCell = c => c.f.poly.length >= 4 && c.f.poly.length <= 6 && c.fill >= 0.9 && c.w <= 6 && c.h <= 3 && c.pa <= 15
+    && !fxPts.some(q => q[0] >= c.x0 && q[0] <= c.x1 && q[1] >= c.y0 && q[1] <= c.y1)
+    && !drPts.some(q => q[0] >= c.x0 - 0.3 && q[0] <= c.x1 + 0.3 && q[1] >= c.y0 - 0.3 && q[1] <= c.y1 + 0.3);
+  const cells = infos.filter(isCell);
+  const uf = new Map(cells.map(c => [c.f.i, c.f.i]));
+  const find = x => uf.get(x) === x ? x : (uf.set(x, find(uf.get(x))), uf.get(x));
+  for (let a = 0; a < cells.length; a++) for (let b = a + 1; b < cells.length; b++) {
+    const A = cells[a], B = cells[b];
+    const rowMate = Math.abs(A.cy - B.cy) <= 0.3 * Math.min(A.h, B.h) && Math.abs(A.cx - B.cx) <= (A.w + B.w) / 2 + 1.0;
+    const colMate = Math.abs(A.cx - B.cx) <= 0.3 * Math.min(A.w, B.w) && Math.abs(A.cy - B.cy) <= (A.h + B.h) / 2 + 1.0;
+    if (rowMate || colMate) { const ra = find(A.f.i), rb = find(B.f.i); if (ra !== rb) uf.set(rb, ra); }
+  }
+  const groups = new Map();
+  cells.forEach(c => { const r = find(c.f.i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(c); });
+  const gl = [...groups.values()].filter(g => g.length >= 3).map(g => ({ g, box: [Math.min(...g.map(c => c.x0)), Math.min(...g.map(c => c.y0)), Math.max(...g.map(c => c.x1)), Math.max(...g.map(c => c.y1))] }));
+  /* 近い集まり（1.5m以内）は1つの表としてまとめてから判定する */
+  const merged = [];
+  gl.forEach(o => {
+    const hit = merged.find(m => o.box[0] <= m.box[2] + 1.5 && o.box[2] >= m.box[0] - 1.5 && o.box[1] <= m.box[3] + 1.5 && o.box[3] >= m.box[1] - 1.5);
+    if (hit) { hit.g.push(...o.g); hit.box = [Math.min(hit.box[0], o.box[0]), Math.min(hit.box[1], o.box[1]), Math.max(hit.box[2], o.box[2]), Math.max(hit.box[3], o.box[3])]; }
+    else merged.push({ g: [...o.g], box: [...o.box] });
+  });
+  for (const m of merged) {
+    const rows = new Set(m.g.map(c => Math.round(c.cy * 2) / 2)).size, cols = new Set(m.g.map(c => Math.round(c.cx * 2) / 2)).size;
+    if (!(m.g.length >= 8 || (m.g.length >= 5 && rows >= 2 && cols >= 2))) continue;
+    m.g.forEach(c => excluded.add(c.f.i));
+    /* 表の外枠らしい区画（マスを5個以上含む四角）も一緒に入れない。
+     * 器具・ドア・部屋の名前がある区画は、表の枠ではなく部屋と見て残す */
+    for (const c of infos) {
+      if (excluded.has(c.f.i) || c.fill < 0.8 || c.pa > 400) continue;
+      const inside = m.g.filter(q => q.cx >= c.x0 && q.cx <= c.x1 && q.cy >= c.y0 && q.cy <= c.y1).length;
+      if (inside < 5) continue;
+      if (fxPts.some(q => q[0] >= c.x0 && q[0] <= c.x1 && q[1] >= c.y0 && q[1] <= c.y1)) continue;
+      if (drPts.some(q => q[0] >= c.x0 - 0.3 && q[0] <= c.x1 + 0.3 && q[1] >= c.y0 - 0.3 && q[1] <= c.y1 + 0.3)) continue;
+      const hasRoomText = (texts || []).some(t => t && t.x >= c.x0 && t.x <= c.x1 && t.y >= c.y0 && t.y <= c.y1 && classify(String(t.t || t.s || '')) === 'room');
+      if (!hasRoomText) excluded.add(c.f.i);
+    }
+  }
+  /* 表が1つの大きな四角にまとまってしまった区画：中にある文字が全部「材料の名前」で、
+   * 部屋の名前・仕上げ注記・器具・ドアが無い四角は、仕上げ表などのマスの塊と見る */
+  const MAT_RE = /塗装|下地|クロス|タイル|シート|ボード|ケイカル|モルタル|仕上|カーペット|フロア/;
+  const FILLER_RE = /^(無し|なし|同上|－|—|-)$/;
+  for (const c of infos) {
+    if (excluded.has(c.f.i) || c.fill < 0.95 || c.pa < 5 || c.pa > 200 || c.f.poly.length > 8) continue;
+    if (fxPts.some(q => q[0] >= c.x0 && q[0] <= c.x1 && q[1] >= c.y0 && q[1] <= c.y1)) continue;
+    if (drPts.some(q => q[0] >= c.x0 - 0.3 && q[0] <= c.x1 + 0.3 && q[1] >= c.y0 - 0.3 && q[1] <= c.y1 + 0.3)) continue;
+    const ts = (texts || []).filter(t => t && t.x >= c.x0 && t.x <= c.x1 && t.y >= c.y0 && t.y <= c.y1).map(t => String(t.t || t.s || ''));
+    if (ts.filter(s => MAT_RE.test(s)).length < 3) continue;
+    if (ts.every(s => (MAT_RE.test(s) || FILLER_RE.test(s.trim())) && !NOTE_RE.test(s) && classify(s) !== 'room' && classify(s) !== 'ch')) excluded.add(c.f.i);
+  }
+  /* 表の見出し（設備機器・仕上げ表など）を含む大きな四角も、表の範囲と見る（器具表・仕上げ表の枠） */
+  const HDR_RE = /設備機器|仕上げ表|仕様表|機器表|器具表/;
+  for (const c of infos) {
+    if (excluded.has(c.f.i) || c.fill < 0.8 || c.pa < 5 || c.pa > 200 || c.f.poly.length > 8) continue;
+    if (fxPts.some(q => q[0] >= c.x0 && q[0] <= c.x1 && q[1] >= c.y0 && q[1] <= c.y1)) continue;
+    if (drPts.some(q => q[0] >= c.x0 - 0.3 && q[0] <= c.x1 + 0.3 && q[1] >= c.y0 - 0.3 && q[1] <= c.y1 + 0.3)) continue;
+    const ts = (texts || []).filter(t => t && t.x >= c.x0 && t.x <= c.x1 && t.y >= c.y0 && t.y <= c.y1).map(t => String(t.t || t.s || ''));
+    if (!ts.some(s => HDR_RE.test(s))) continue;
+    if (ts.some(s => classify(s) === 'room')) continue;
+    excluded.add(c.f.i);
+  }
+}
+  return { excluded, boxes };
+}
+
 export function computeZones({ segs = [], faces = [], texts = [], doors = [], marks = null, fixtures = [] } = {}) {
   const F = (faces || []).filter(f => f && f.poly && f.poly.length >= 3);
   if (!F.length || !segs.length) return [];
@@ -20,81 +107,7 @@ export function computeZones({ segs = [], faces = [], texts = [], doors = [], ma
    * 印が無い・保留（hold）の区画は今まで通り（分からない物を勝手に外さない） */
   const excluded = new Set();
   if (marks) for (const f of F) { const m = marks[f.i] || marks[String(f.i)]; if (m && m.s === 'out' && (m.type === 'table' || m.type === 'title' || m.type === 'frame')) excluded.add(f.i); }
-  /* 表のマス：小さな四角い区画が縦横そろって格子状に並んだ集まりは、表と見て候補に入れない。
-   * 器具・ドアのある区画（トイレのブース等）はマスにしない。1段・1列だけの並びは
-   * 部屋やロッカーの並びと区別できないので外さない。近くの集まり同士は1つの表としてまとめる */
-  {
-    const shoeZ = P => Math.abs(P.reduce((s, q, k) => { const n = P[(k + 1) % P.length]; return s + q[0] * n[1] - n[0] * q[1]; }, 0)) / 2;
-    const fxPts = (fixtures || []).filter(f => f && (f.b || f.cx != null)).map(f => f.b ? [(f.b[0] + f.b[2]) / 2, (f.b[1] + f.b[3]) / 2] : [f.cx, f.cy]);
-    const drPts = (doors || []).filter(d => d && d.c).map(d => d.c);
-    const infos = F.map(f => {
-      const xs = f.poly.map(q => q[0]), ys = f.poly.map(q => q[1]);
-      const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
-      const w = x1 - x0, h = y1 - y0, pa = shoeZ(f.poly);
-      return { f, x0, y0, x1, y1, w, h, pa, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, fill: w * h > 0 ? pa / (w * h) : 0 };
-    });
-    const isCell = c => c.f.poly.length >= 4 && c.f.poly.length <= 6 && c.fill >= 0.9 && c.w <= 6 && c.h <= 3 && c.pa <= 15
-      && !fxPts.some(q => q[0] >= c.x0 && q[0] <= c.x1 && q[1] >= c.y0 && q[1] <= c.y1)
-      && !drPts.some(q => q[0] >= c.x0 - 0.3 && q[0] <= c.x1 + 0.3 && q[1] >= c.y0 - 0.3 && q[1] <= c.y1 + 0.3);
-    const cells = infos.filter(isCell);
-    const uf = new Map(cells.map(c => [c.f.i, c.f.i]));
-    const find = x => uf.get(x) === x ? x : (uf.set(x, find(uf.get(x))), uf.get(x));
-    for (let a = 0; a < cells.length; a++) for (let b = a + 1; b < cells.length; b++) {
-      const A = cells[a], B = cells[b];
-      const rowMate = Math.abs(A.cy - B.cy) <= 0.3 * Math.min(A.h, B.h) && Math.abs(A.cx - B.cx) <= (A.w + B.w) / 2 + 1.0;
-      const colMate = Math.abs(A.cx - B.cx) <= 0.3 * Math.min(A.w, B.w) && Math.abs(A.cy - B.cy) <= (A.h + B.h) / 2 + 1.0;
-      if (rowMate || colMate) { const ra = find(A.f.i), rb = find(B.f.i); if (ra !== rb) uf.set(rb, ra); }
-    }
-    const groups = new Map();
-    cells.forEach(c => { const r = find(c.f.i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(c); });
-    const gl = [...groups.values()].filter(g => g.length >= 3).map(g => ({ g, box: [Math.min(...g.map(c => c.x0)), Math.min(...g.map(c => c.y0)), Math.max(...g.map(c => c.x1)), Math.max(...g.map(c => c.y1))] }));
-    /* 近い集まり（1.5m以内）は1つの表としてまとめてから判定する */
-    const merged = [];
-    gl.forEach(o => {
-      const hit = merged.find(m => o.box[0] <= m.box[2] + 1.5 && o.box[2] >= m.box[0] - 1.5 && o.box[1] <= m.box[3] + 1.5 && o.box[3] >= m.box[1] - 1.5);
-      if (hit) { hit.g.push(...o.g); hit.box = [Math.min(hit.box[0], o.box[0]), Math.min(hit.box[1], o.box[1]), Math.max(hit.box[2], o.box[2]), Math.max(hit.box[3], o.box[3])]; }
-      else merged.push({ g: [...o.g], box: [...o.box] });
-    });
-    for (const m of merged) {
-      const rows = new Set(m.g.map(c => Math.round(c.cy * 2) / 2)).size, cols = new Set(m.g.map(c => Math.round(c.cx * 2) / 2)).size;
-      if (!(m.g.length >= 8 || (m.g.length >= 5 && rows >= 2 && cols >= 2))) continue;
-      m.g.forEach(c => excluded.add(c.f.i));
-      /* 表の外枠らしい区画（マスを5個以上含む四角）も一緒に入れない。
-       * 器具・ドア・部屋の名前がある区画は、表の枠ではなく部屋と見て残す */
-      for (const c of infos) {
-        if (excluded.has(c.f.i) || c.fill < 0.8 || c.pa > 400) continue;
-        const inside = m.g.filter(q => q.cx >= c.x0 && q.cx <= c.x1 && q.cy >= c.y0 && q.cy <= c.y1).length;
-        if (inside < 5) continue;
-        if (fxPts.some(q => q[0] >= c.x0 && q[0] <= c.x1 && q[1] >= c.y0 && q[1] <= c.y1)) continue;
-        if (drPts.some(q => q[0] >= c.x0 - 0.3 && q[0] <= c.x1 + 0.3 && q[1] >= c.y0 - 0.3 && q[1] <= c.y1 + 0.3)) continue;
-        const hasRoomText = (texts || []).some(t => t && t.x >= c.x0 && t.x <= c.x1 && t.y >= c.y0 && t.y <= c.y1 && classify(String(t.t || t.s || '')) === 'room');
-        if (!hasRoomText) excluded.add(c.f.i);
-      }
-    }
-    /* 表が1つの大きな四角にまとまってしまった区画：中にある文字が全部「材料の名前」で、
-     * 部屋の名前・仕上げ注記・器具・ドアが無い四角は、仕上げ表などのマスの塊と見る */
-    const MAT_RE = /塗装|下地|クロス|タイル|シート|ボード|ケイカル|モルタル|仕上|カーペット|フロア/;
-    const FILLER_RE = /^(無し|なし|同上|－|—|-)$/;
-    for (const c of infos) {
-      if (excluded.has(c.f.i) || c.fill < 0.95 || c.pa < 5 || c.pa > 200 || c.f.poly.length > 8) continue;
-      if (fxPts.some(q => q[0] >= c.x0 && q[0] <= c.x1 && q[1] >= c.y0 && q[1] <= c.y1)) continue;
-      if (drPts.some(q => q[0] >= c.x0 - 0.3 && q[0] <= c.x1 + 0.3 && q[1] >= c.y0 - 0.3 && q[1] <= c.y1 + 0.3)) continue;
-      const ts = (texts || []).filter(t => t && t.x >= c.x0 && t.x <= c.x1 && t.y >= c.y0 && t.y <= c.y1).map(t => String(t.t || t.s || ''));
-      if (ts.filter(s => MAT_RE.test(s)).length < 3) continue;
-      if (ts.every(s => (MAT_RE.test(s) || FILLER_RE.test(s.trim())) && !NOTE_RE.test(s) && classify(s) !== 'room' && classify(s) !== 'ch')) excluded.add(c.f.i);
-    }
-    /* 表の見出し（設備機器・仕上げ表など）を含む大きな四角も、表の範囲と見る（器具表・仕上げ表の枠） */
-    const HDR_RE = /設備機器|仕上げ表|仕様表|機器表|器具表/;
-    for (const c of infos) {
-      if (excluded.has(c.f.i) || c.fill < 0.8 || c.pa < 5 || c.pa > 200 || c.f.poly.length > 8) continue;
-      if (fxPts.some(q => q[0] >= c.x0 && q[0] <= c.x1 && q[1] >= c.y0 && q[1] <= c.y1)) continue;
-      if (drPts.some(q => q[0] >= c.x0 - 0.3 && q[0] <= c.x1 + 0.3 && q[1] >= c.y0 - 0.3 && q[1] <= c.y1 + 0.3)) continue;
-      const ts = (texts || []).filter(t => t && t.x >= c.x0 && t.x <= c.x1 && t.y >= c.y0 && t.y <= c.y1).map(t => String(t.t || t.s || ''));
-      if (!ts.some(s => HDR_RE.test(s))) continue;
-      if (ts.some(s => classify(s) === 'room')) continue;
-      excluded.add(c.f.i);
-    }
-  }
+  detectTableAreas({ faces: F, texts, fixtures, doors, excluded });
 
   /* 1) 線を端点の近さで集まりに分け、家具サイズの集まりを壁から外す */
   const uf = new Int32Array(segs.length).map((_, i) => i);

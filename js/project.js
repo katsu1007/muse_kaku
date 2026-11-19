@@ -14,7 +14,8 @@ import { classifyBox, classifyCluster, buildChairContexts, SYM_VERDICTS, SYM_DIC
 import { detectFurniture } from './furndetect.js';
 import { rescueFixtures, mergeFixtures } from './fixrescue.js';
 import { judgeRooms, ROOM_JUDGE } from './roomjudge.js';
-import { computeZones, splitFacesByLine } from './zones.js';
+import { computeZones, splitFacesByLine, detectTableAreas } from './zones.js';
+import { supplementFaces } from './polygonize.js';
 import { extractDxfDims, checkDimensions, dimCheckFor } from './dxf-dims.js';
 import { USES, DEF_LM, needCount, pitchFor, luxOf, wirePlan, cableQty, pip, polyD } from './lighting.js';
 /* iPhone・iPad では、選べるファイルの種類を絞ると .jww・.jwc・.dxf が灰色になって選べない（iPhone がこの拡張子を知らないため）。
@@ -447,28 +448,31 @@ function symSummary(d, selK = -1) {
 
 /* 部屋の見分け（現段階）：今の読み取り・解析が持っている根拠で区画を色分けする（表示だけ。部屋・見積は変えない） */
 const rjCache = new WeakMap();
+/* 見分けの対象：エンジンの区画＋補足区画（js/polygonize.js。線から作った候補）。
+ * 補足区画は読み取り直した区画（v2）に差し替えている間は対象にしない（補足は元の区画に対して作ってあるため） */
+const judgeFacesOf = d => [...(d.plan.faces || []), ...(d.reader === 'v2' ? [] : (d.polyFaces || []))];
 function roomJudge(d) {
   if (!d || !d.plan || !d.plan.faces) return null;
   const c = rjCache.get(d);
   /* ゾーンは名前の付け替え等でその場で書き換わるので、配列の同一性ではなく署名で比べる */
   const zsig = (d.zones || []).map(z => `${z.id || ''}|${z.name || ''}|${(z.faces || []).length}`).join(';');
-  if (c && c.faces === d.plan.faces && c.analysis === d.analysis && c.fixtures === d.fixtures && c.doors === d.doors && c.src2 === d.src2 && c.zsig === zsig) return c.r;
+  if (c && c.faces === d.plan.faces && c.poly === d.polyFaces && c.reader === d.reader && c.analysis === d.analysis && c.fixtures === d.fixtures && c.doors === d.doors && c.src2 === d.src2 && c.zsig === zsig) return c.r;
   const A = d.analysis || {};
-  const r = judgeRooms(d.plan.faces, { marks: A.marks || {}, names: A.names || {}, fixtures: d.fixtures || [], doors: d.doors || [], zones: d.zones || [], texts: (d.src2 && d.src2.texts) || [] });
-  rjCache.set(d, { faces: d.plan.faces, analysis: d.analysis, fixtures: d.fixtures, doors: d.doors, src2: d.src2, zsig, r });
+  const r = judgeRooms(judgeFacesOf(d), { marks: A.marks || {}, names: A.names || {}, fixtures: d.fixtures || [], doors: d.doors || [], zones: d.zones || [], texts: (d.src2 && d.src2.texts) || [] });
+  rjCache.set(d, { faces: d.plan.faces, poly: d.polyFaces, reader: d.reader, analysis: d.analysis, fixtures: d.fixtures, doors: d.doors, src2: d.src2, zsig, r });
   return r;
 }
 function roomJudgeEntries(d) {
   const r = roomJudge(d); if (!r) return [];
   const style = { room: { op: 0.06, so: 0.95 }, hold: { op: 0.05, so: 0.9, dash: true }, out: { op: 0.10, so: 0.7 }, unknown: { op: 0, so: 0.35 } };
-  return (d.plan.faces || []).filter(f => f && f.poly && r.map[f.i]).map(f => ({ poly: f.poly, color: ROOM_JUDGE[r.map[f.i]].color, ...(style[r.map[f.i]] || {}) }));
+  return judgeFacesOf(d).filter(f => f && f.poly && r.map[f.i]).map(f => ({ poly: f.poly, color: ROOM_JUDGE[r.map[f.i]].color, ...(style[r.map[f.i]] || {}) }));
 }
 function roomSummary(d) {
   const r = roomJudge(d); if (!r || !r.counts.total) return '';
   const c = r.counts;
   return `<div class="row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)"><b class="small">部屋の見分け（現段階）</b>
     ${['room', 'hold', 'out', 'unknown'].map(k => `<span class="pill" style="border:1px solid ${ROOM_JUDGE[k].color};color:${ROOM_JUDGE[k].color}">${ROOM_JUDGE[k].name} ${c[k]}</span>`).join('')}
-    <span class="small muted">全 ${c.total} 区画。緑は名前・器具・ドア・ゾーンの根拠がある区画です。色は図面の「室」ボタンで消せます。部屋・見積には影響しません</span></div>`;
+    <span class="small muted">全 ${c.total} 区画。緑は名前・器具・ドア・ゾーンの根拠がある区画です。${d.reader !== 'v2' && (d.polyFaces || []).length ? `うち ${(d.polyFaces || []).length} 件は、区画として拾えなかった床を線から作った補足区画です。` : ''}色は図面の「室」ボタンで消せます。部屋・見積には影響しません</span></div>`;
 }
 
 function fixSummary(d) {
@@ -1395,6 +1399,14 @@ function stepRooms(ctx) {
         if (cad) { try { p.drawing.analysis = analyzeFrame({ segs: res.longSegs && res.longSegs.length ? res.longSegs : res.plan.segs, faces: res.plan.faces, texts: res.texts || [], fixtures: allFixtures, doors: res.doorList || [] }); } catch (e2) { console.warn('新しい読み取りの解析に失敗', e2); } }
         /* ゾーン分けは解析の後（表・表題欄・図枠と確定した区画を候補に入れないため、印を渡す） */
         if (cad) { try { p.drawing.zones = computeZones({ segs: res.plan.segs || [], faces: res.plan.faces || [], texts: res.texts || [], doors: res.doorList || [], marks: (p.drawing.analysis && p.drawing.analysis.marks) || null, fixtures: allFixtures }).map(z => ({ id: uid('z'), fixed: false, ...z })); } catch (e2) { console.warn('ゾーン分けに失敗', e2); p.drawing.zones = []; } }
+        /* 補足区画：区画として拾えなかった床を、自前の輪郭化（js/polygonize.js）で線そのものから作る。
+         * エンジンの区画と重なる物は作らない（エンジン優先）。表示と部屋の見分けだけに使い、部屋・ゾーン・見積には入れない。
+         * 表・仕上げ表のラベル帯の中の輪は、表の検出（detectTableAreas）と解析の領域（table/title）を使って最初から作らない */
+        if (cad) { try {
+          const tb = detectTableAreas({ faces: res.plan.faces || [], texts: res.texts || [], fixtures: allFixtures, doors: res.doorList || [] }).boxes;
+          const rb = ((p.drawing.analysis && p.drawing.analysis.regions) || []).filter(r => r.type === 'table' || r.type === 'title').map(r => r.box);
+          p.drawing.polyFaces = supplementFaces({ segs: res.plan.segs || [], faces: res.plan.faces || [], fixtures: allFixtures, texts: res.texts || [], doors: res.doorList || [], tableBoxes: [...tb, ...rb] });
+        } catch (e2) { console.warn('補足区画の作成に失敗', e2); p.drawing.polyFaces = []; } }
         if (cad && res.v2) { try { const P2 = { faces: res.v2.faces }; orderFacesOf(P2);
           /* 扉の無い開口は「区画の辺に壁の線が無い所」で決めるので、区画の形が壁の線に沿っていないと、辺のほとんどが開口になる。
            * 開口が周りの3割以上になる区画は、形が合っていないと見て、扉の無い開口を引かない（分からない物を引かない。ドアは残す） */
