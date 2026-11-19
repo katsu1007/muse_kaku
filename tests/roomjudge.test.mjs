@@ -203,6 +203,44 @@ test('器具の近く：印のある区画（保留・除外）は上書きし�
   assert.equal(r.map[2], 'out');
 });
 
+test('ゾーンの保留より直接の根拠が強い：同居だけの保留は器具の近さで部屋になる', () => {
+  /* 区画1はドアで部屋（直接の根拠）。区画2は名前の無いゾーンで同居 → いったん保留。
+   * そこへ区画2の縁から0.1mに便器（どの区画にも入っていない）があれば、保留より
+   * 直接の根拠（器具の近さ）が勝って部屋になる */
+  const faces = [face(1, 0, 0, 2, 2), face(2, 3, 0, 1.5, 1.5)];
+  const zones = [{ name: '', faces: [1, 2] }];
+  const doors = [{ c: [1, 1], m: null }];
+  const held = judgeRooms(faces, { zones, doors });
+  assert.equal(held.map[2], 'hold');
+  assert.deepEqual(held.why[2], ['ゾーン']);
+  const r = judgeRooms(faces, { zones, doors, fixtures: [{ t: 'toilet', b: [2.3, 0.4, 2.9, 1.4] }] });
+  assert.equal(r.map[2], 'room');
+  assert.deepEqual(r.why[2], ['器具']);
+  assert.equal(r.counts.room, 2);
+  assert.equal(r.counts.hold, 0);
+});
+
+test('ゾーンの保留より直接の根拠が強い：同居だけの保留は名前の近さでも部屋になる', () => {
+  const faces = [face(1, 0, 0, 2, 2), face(2, 3, 0, 1.5, 1.5)];
+  const zones = [{ name: '', faces: [1, 2] }];
+  const doors = [{ c: [1, 1], m: null }];
+  const r = judgeRooms(faces, { zones, doors, texts: [{ t: '便所', x: 2.7, y: 0.75 }] });   /* 区画2の縁から0.3m */
+  assert.equal(r.map[2], 'room');
+  assert.deepEqual(r.why[2], ['名前']);
+});
+
+test('印の保留は、ゾーンの同居と器具の近さがあっても動かない', () => {
+  const faces = [face(1, 0, 0, 2, 2), face(2, 3, 0, 1.5, 1.5)];
+  const r = judgeRooms(faces, {
+    marks: { 2: { s: 'hold', type: 'ring' } },
+    zones: [{ name: '', faces: [1, 2] }],
+    doors: [{ c: [1, 1], m: null }],
+    fixtures: [{ t: 'toilet', b: [2.3, 0.4, 2.9, 1.4] }]
+  });
+  assert.equal(r.map[1], 'room');
+  assert.equal(r.map[2], 'hold');
+});
+
 test('文字を渡さなければ従来と完全に同じ', () => {
   const faces = [face(1, 0, 0, 3, 3), face(2, 5, 0, 3, 3)];
   const args = { fixtures: [{ b: [6, 1, 6.5, 1.5] }] };

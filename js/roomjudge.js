@@ -20,7 +20,11 @@
  * 見る（4段目）：水回りの器具（便器・小便器・洗面・手洗）が縁から 0.5m 以内にある小さい
  * 区画（6㎡以下）は、その水回りの部屋の床の断片とみる。大きい区画は開けた床が器具に接して
  * いるだけのことが多いので対象にしない。表の中（除外の印の区画）にある器具と、会社名
- * スタンプのゾーンの区画は根拠にしない。 */
+ * スタンプのゾーンの区画は根拠にしない。
+ * 3段目・4段目の直接の根拠は、2段目で「ゾーンの同居」だけを理由に保留になった区画にも
+ * 効かせる（根拠の強さは ゾーンの同居 < 名前・器具の近さ、の順。ゾーンの保留は仮の
+ * 判断なので、後から見つかった直接の根拠が優先する）。ただし解析の印で保留になった
+ * 区画（輪・帯など）は、直接の根拠でも動かさない。 */
 
 import { classify, joinTexts } from './reader2/text.js';
 
@@ -132,11 +136,18 @@ export function judgeRooms(faces = [], { marks = {}, names = {}, fixtures = [], 
     }
   }
 
+  /* 「ゾーンの同居」だけを理由に保留になった区画（why が ゾーン だけの保留）。
+   * 3段目・4段目の直接の根拠は、この保留より強いので対象に含める。
+   * 印の保留（why が無い）や直接の根拠は、今まで通り対象にしない */
+  const softHold = f => map[f.i] === 'hold' && Array.isArray(why[f.i]) && why[f.i].length === 1 && why[f.i][0] === 'ゾーン';
+  const undecided = f => map[f.i] === 'unknown' || softHold(f);
+  const decide = (f, kind) => { if (map[f.i] === 'hold') counts.hold--; else counts.unknown--; counts.room++; map[f.i] = 'room'; why[f.i] = [kind]; };
+
   /* 3段目：名前の近く。部屋名の文字が区画の外にあって、その縁から 0.5m 以内に
    * ある区画は、その名前の部屋の床の断片とみる（ゾーン分けで取り付けられなかった
    * 小さい断片や、名前の文字が隣の区画に入っている場合）。文字が区画の中にある
    * 場合は1段目（一番小さい区画への付与）の担当なので、ここでは見ない。
-   * 印と直接・ゾーンの根拠は今まで通り上書きしない */
+   * 印と直接の根拠は今まで通り上書きしない（ゾーンの保留だけは直接の根拠が勝つ） */
   if (roomTexts.length) {
     const segDist = (px, py, a, b) => {
       const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy;
@@ -145,14 +156,14 @@ export function judgeRooms(faces = [], { marks = {}, names = {}, fixtures = [], 
       return Math.hypot(px - (a[0] + t * dx), py - (a[1] + t * dy));
     };
     for (const f of F) {
-      if (map[f.i] !== 'unknown') continue;
+      if (!undecided(f)) continue;
       const b = bbox.get(f.i);
       for (const t of roomTexts) {
         if (pip(t.x, t.y, f.poly)) continue;   /* 中にある名前は1段目（一番小さい区画）の担当 */
         if (t.x < b[0] - 0.5 || t.x > b[2] + 0.5 || t.y < b[1] - 0.5 || t.y > b[3] + 0.5) continue;
         let d = Infinity;
         for (let k = 0; k < f.poly.length; k++) d = Math.min(d, segDist(t.x, t.y, f.poly[k], f.poly[(k + 1) % f.poly.length]));
-        if (d <= 0.5) { counts.unknown--; counts.room++; map[f.i] = 'room'; why[f.i] = ['名前']; break; }
+        if (d <= 0.5) { decide(f, '名前'); break; }
       }
     }
   }
@@ -204,14 +215,14 @@ export function judgeRooms(faces = [], { marks = {}, names = {}, fixtures = [], 
     const faceZone = new Map();
     if (zones && zones.length) for (const z of zones) for (const i of (z && z.faces) || []) if (!faceZone.has(i)) faceZone.set(i, z);
     for (const f of F) {
-      if (map[f.i] !== 'unknown') continue;
+      if (!undecided(f)) continue;
       if (!(f.area > 0) || f.area > 6) continue;
       const z = faceZone.get(f.i);
       if (z && STAMP_RE.test(String(z.name || ''))) continue;
       const b = bbox.get(f.i);
       for (const x of usable) {
         if (x.b[0] > b[2] + 0.5 || x.b[2] < b[0] - 0.5 || x.b[1] > b[3] + 0.5 || x.b[3] < b[1] - 0.5) continue;
-        if (faceFxDist(f, x.b) <= 0.5) { counts.unknown--; counts.room++; map[f.i] = 'room'; why[f.i] = ['器具']; break; }
+        if (faceFxDist(f, x.b) <= 0.5) { decide(f, '器具'); break; }
       }
     }
   }
