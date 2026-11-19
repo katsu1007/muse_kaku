@@ -1,7 +1,9 @@
 /* シンボル辞書（認識専用）— 図面の中の図形が「何であるか」を、幾何そのものではなく
  * 特徴（寸法・縦横比・円弧の割合・閉じているか・内側の閉曲線・分割線）で照合する。
  * 目的は図面の読み取り・解釈・認識だけ。メーカーの元データは使わず、
- * 一般化したルールパターンと、CC0の実測特徴だけでできている。
+ * 一般化したルールパターンと、商用利用可能な素材（Innerscene=CC0 1.0、
+ * nasji.com=商用利用可・帰属不要の表明、2026-11-19確認）の実測特徴だけでできている。
+ * 出典は各パターンの source に記録。幾何そのものは保持しない。
  * 認識のしきい値は類似度 0.90（2026-11-18 決定。誤認を避けるため高め）。
  * 0.90 未満、または候補が僅差のものは「不明」「要確認」のまま残し、確定しない。 */
 export const SYM_THRESHOLD = 0.90;
@@ -203,6 +205,33 @@ export const SYM_DICT = [
      "closed_outline": true,
      "n_entities": 3
     }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-urinal（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/bathroom/nasji-urinal",
+     "block": "URINAL",
+     "file": "bathroom__nasji-urinal.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 355.6,
+      "long": 457.2
+     },
+     "aspect": 1.29,
+     "hist": {
+      "LINE": 11,
+      "ELLIPSE": 2,
+      "CIRCLE": 2,
+      "LWPOLYLINE": 1
+     },
+     "arc_share": 0.25,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 16
+    }
    }
   ]
  },
@@ -345,6 +374,167 @@ export const SYM_DICT = [
      "closed_outline": true,
      "inner_closed": true,
      "n_entities": 4
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-sink-bath-rect（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/bathroom/nasji-sink-bath-rect",
+     "block": "SINK-BATH-RECT",
+     "file": "bathroom__nasji-sink-bath-rect.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 558.8,
+      "long": 787.4
+     },
+     "aspect": 1.41,
+     "hist": {
+      "LWPOLYLINE": 3,
+      "LINE": 16,
+      "ARC": 8,
+      "CIRCLE": 2
+     },
+     "arc_share": 0.34,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 29
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-sink-bath-rnd（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/bathroom/nasji-sink-bath-rnd",
+     "block": "SINK-BATH-RND",
+     "file": "bathroom__nasji-sink-bath-rnd.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 558.8,
+      "long": 736.6
+     },
+     "aspect": 1.32,
+     "hist": {
+      "LWPOLYLINE": 3,
+      "CIRCLE": 4,
+      "LINE": 8
+     },
+     "arc_share": 0.27,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 15
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-sink-comp-1（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/bathroom/nasji-sink-comp-1",
+     "block": "SINK-COMP-1",
+     "file": "bathroom__nasji-sink-comp-1.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 508,
+      "long": 609.6
+     },
+     "aspect": 1.2,
+     "hist": {
+      "LWPOLYLINE": 3,
+      "LINE": 17,
+      "ARC": 8,
+      "CIRCLE": 2
+     },
+     "arc_share": 0.33,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 30
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-sink-comp-3（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/bathroom/nasji-sink-comp-3",
+     "block": "SINK-COMP-3",
+     "file": "bathroom__nasji-sink-comp-3.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 609.6,
+      "long": 2438.4
+     },
+     "aspect": 4,
+     "hist": {
+      "LWPOLYLINE": 9,
+      "LINE": 47,
+      "ARC": 24,
+      "CIRCLE": 6
+     },
+     "arc_share": 0.35,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 86
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-sink-corner（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/bathroom/nasji-sink-corner",
+     "block": "SINK-CORNER",
+     "file": "bathroom__nasji-sink-corner.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 609.6,
+      "long": 609.6
+     },
+     "aspect": 1,
+     "hist": {
+      "LWPOLYLINE": 3,
+      "LINE": 16,
+      "ARC": 8,
+      "CIRCLE": 2
+     },
+     "arc_share": 0.34,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 29
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "rectangular-washbasin-plan（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/bathroom/rectangular-washbasin-plan",
+     "block": "A$C7CEF525E",
+     "file": "bathroom__rectangular-washbasin-plan.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 430,
+      "long": 570
+     },
+     "aspect": 1.33,
+     "hist": {
+      "LINE": 15,
+      "ARC": 6,
+      "CIRCLE": 4,
+      "LWPOLYLINE": 1
+     },
+     "arc_share": 0.38,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 26
     }
    }
   ]
@@ -795,6 +985,332 @@ export const SYM_DICT = [
      "inner_closed": true,
      "n_entities": 2
     }
+   },
+   {
+    "origin": "measured",
+    "label": "l-shaped-computer-desk-plan（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/l-shaped-computer-desk-plan",
+     "block": "A$C6FC27815",
+     "file": "furniture__l-shaped-computer-desk-plan.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 2010,
+      "long": 2210
+     },
+     "aspect": 1.1,
+     "hist": {
+      "LINE": 230,
+      "ARC": 22,
+      "CIRCLE": 5,
+      "LWPOLYLINE": 5
+     },
+     "arc_share": 0.1,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 262
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-classroom-desk（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-classroom-desk",
+     "block": "CLASSROOM-DESK",
+     "file": "furniture__nasji-classroom-desk.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 508,
+      "long": 609.6
+     },
+     "aspect": 1.2,
+     "hist": {
+      "LWPOLYLINE": 3,
+      "LINE": 2
+     },
+     "arc_share": 0,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 5
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-coffee-table-48x24（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-coffee-table-48x24",
+     "block": "COFFEE-TABLE-48X24",
+     "file": "furniture__nasji-coffee-table-48x24.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 609.6,
+      "long": 1219.2
+     },
+     "aspect": 2,
+     "hist": {
+      "LWPOLYLINE": 3
+     },
+     "arc_share": 0,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 3
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-coffee-table-oval-48x26（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-coffee-table-oval-48x26",
+     "block": "COFFEE-TABLE-OVAL-48X26",
+     "file": "furniture__nasji-coffee-table-oval-48x26.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 660.4,
+      "long": 1219.2
+     },
+     "aspect": 1.85,
+     "hist": {
+      "ELLIPSE": 3
+     },
+     "arc_share": 1,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 3
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-conference-table-10（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-conference-table-10",
+     "block": "CONFERENCE-TABLE-10",
+     "file": "furniture__nasji-conference-table-10.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 1219.2,
+      "long": 3048
+     },
+     "aspect": 2.5,
+     "hist": {
+      "LWPOLYLINE": 3,
+      "CIRCLE": 3
+     },
+     "arc_share": 0.5,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 6
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-conference-table-12（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-conference-table-12",
+     "block": "CONFERENCE-TABLE-12",
+     "file": "furniture__nasji-conference-table-12.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 1371.6,
+      "long": 3657.6
+     },
+     "aspect": 2.67,
+     "hist": {
+      "LWPOLYLINE": 3,
+      "CIRCLE": 4
+     },
+     "arc_share": 0.57,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 7
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-conference-table-6（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-conference-table-6",
+     "block": "CONFERENCE-TABLE-6",
+     "file": "furniture__nasji-conference-table-6.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 914.4,
+      "long": 1828.8
+     },
+     "aspect": 2,
+     "hist": {
+      "LWPOLYLINE": 3,
+      "CIRCLE": 2
+     },
+     "arc_share": 0.4,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 5
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-conference-table-8（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-conference-table-8",
+     "block": "CONFERENCE-TABLE-8",
+     "file": "furniture__nasji-conference-table-8.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 1219.2,
+      "long": 2438.4
+     },
+     "aspect": 2,
+     "hist": {
+      "LWPOLYLINE": 3,
+      "CIRCLE": 2
+     },
+     "arc_share": 0.4,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 5
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-desk-60x30（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-desk-60x30",
+     "block": "DESK-60X30",
+     "file": "furniture__nasji-desk-60x30.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 762,
+      "long": 1524
+     },
+     "aspect": 2,
+     "hist": {
+      "LWPOLYLINE": 3,
+      "LINE": 5,
+      "CIRCLE": 2
+     },
+     "arc_share": 0.2,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 10
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-lab-bench-72（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-lab-bench-72",
+     "block": "LAB-BENCH-72",
+     "file": "furniture__nasji-lab-bench-72.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 762,
+      "long": 1828.8
+     },
+     "aspect": 2.4,
+     "hist": {
+      "LWPOLYLINE": 2,
+      "LINE": 4,
+      "CIRCLE": 2
+     },
+     "arc_share": 0.25,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 8
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-table-30x48（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-table-30x48",
+     "block": "TABLE-30X48",
+     "file": "furniture__nasji-table-30x48.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 762,
+      "long": 1219.2
+     },
+     "aspect": 1.6,
+     "hist": {
+      "LWPOLYLINE": 3
+     },
+     "arc_share": 0,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 3
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-table-oval-42x84（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-table-oval-42x84",
+     "block": "TABLE-OVAL-42X84",
+     "file": "furniture__nasji-table-oval-42x84.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 1066.8,
+      "long": 2133.6
+     },
+     "aspect": 2,
+     "hist": {
+      "LWPOLYLINE": 9,
+      "LINE": 2
+     },
+     "arc_share": 0,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 11
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-workbench-72（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-workbench-72",
+     "block": "WORKBENCH-72",
+     "file": "furniture__nasji-workbench-72.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 609.6,
+      "long": 1828.8
+     },
+     "aspect": 3,
+     "hist": {
+      "LWPOLYLINE": 5,
+      "LINE": 3
+     },
+     "arc_share": 0,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 8
+    }
    }
   ]
  },
@@ -950,6 +1466,211 @@ export const SYM_DICT = [
      "closed_outline": true,
      "inner_closed": false,
      "n_entities": 2
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-fitting-bench-42（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/bathroom/nasji-fitting-bench-42",
+     "block": "FITTING-BENCH-42",
+     "file": "bathroom__nasji-fitting-bench-42.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 508,
+      "long": 1066.8
+     },
+     "aspect": 2.1,
+     "hist": {
+      "LWPOLYLINE": 1,
+      "LINE": 6
+     },
+     "arc_share": 0,
+     "closed_outline": true,
+     "inner_closed": false,
+     "n_entities": 7
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "angular-upholstered-armchair-plan（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/angular-upholstered-armchair-plan",
+     "block": "A$C7EC567CE",
+     "file": "furniture__angular-upholstered-armchair-plan.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 1202.1,
+      "long": 1328.6
+     },
+     "aspect": 1.11,
+     "hist": {
+      "LINE": 7,
+      "ARC": 4,
+      "LWPOLYLINE": 1
+     },
+     "arc_share": 0.33,
+     "closed_outline": true,
+     "inner_closed": false,
+     "n_entities": 12
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "curved-back-dining-chair-plan（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/curved-back-dining-chair-plan",
+     "block": "A$C29F5351B",
+     "file": "furniture__curved-back-dining-chair-plan.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 403.1,
+      "long": 674.7
+     },
+     "aspect": 1.67,
+     "hist": {
+      "LINE": 6,
+      "ARC": 4,
+      "LWPOLYLINE": 2
+     },
+     "arc_share": 0.33,
+     "closed_outline": true,
+     "inner_closed": false,
+     "n_entities": 12
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "detailed-salon-chair-plan（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/detailed-salon-chair-plan",
+     "block": "A$C04B47921",
+     "file": "furniture__detailed-salon-chair-plan.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 562,
+      "long": 1443.3
+     },
+     "aspect": 2.57,
+     "hist": {
+      "LINE": 57,
+      "LWPOLYLINE": 18,
+      "ARC": 51,
+      "CIRCLE": 1
+     },
+     "arc_share": 0.41,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 127
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "five-star-swivel-office-chair-plan（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/five-star-swivel-office-chair-plan",
+     "block": "A$C649664E4",
+     "file": "furniture__five-star-swivel-office-chair-plan.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 487.4,
+      "long": 856.4
+     },
+     "aspect": 1.76,
+     "hist": {
+      "LINE": 9,
+      "ARC": 17,
+      "CIRCLE": 1,
+      "LWPOLYLINE": 5
+     },
+     "arc_share": 0.56,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 32
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-armchair-30（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-armchair-30",
+     "block": "ARMCHAIR-30",
+     "file": "furniture__nasji-armchair-30.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 762,
+      "long": 812.8
+     },
+     "aspect": 1.07,
+     "hist": {
+      "LWPOLYLINE": 5,
+      "LINE": 2
+     },
+     "arc_share": 0,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 7
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-chair-dining（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-chair-dining",
+     "block": "CHAIR-DINING",
+     "file": "furniture__nasji-chair-dining.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 457.2,
+      "long": 529.2
+     },
+     "aspect": 1.16,
+     "hist": {
+      "LWPOLYLINE": 2
+     },
+     "arc_share": 0,
+     "closed_outline": true,
+     "inner_closed": false,
+     "n_entities": 2
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "ornate-upholstered-armchair-plan（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/ornate-upholstered-armchair-plan",
+     "block": "A$C7B1448BC",
+     "file": "furniture__ornate-upholstered-armchair-plan.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 428.2,
+      "long": 768.8
+     },
+     "aspect": 1.8,
+     "hist": {
+      "LINE": 1,
+      "LWPOLYLINE": 66
+     },
+     "arc_share": 0,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 67
     }
    }
   ]
@@ -1203,6 +1924,256 @@ export const SYM_DICT = [
      "inner_closed": false,
      "n_entities": 3
     }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-bookshelf-48x12（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-bookshelf-48x12",
+     "block": "BOOKSHELF-48X12",
+     "file": "furniture__nasji-bookshelf-48x12.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 304.8,
+      "long": 1219.2
+     },
+     "aspect": 4,
+     "hist": {
+      "LWPOLYLINE": 2,
+      "LINE": 12
+     },
+     "arc_share": 0,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 14
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-bookshelf-72x12（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-bookshelf-72x12",
+     "block": "BOOKSHELF-72X12",
+     "file": "furniture__nasji-bookshelf-72x12.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 304.8,
+      "long": 1828.8
+     },
+     "aspect": 6,
+     "hist": {
+      "LWPOLYLINE": 2,
+      "LINE": 18
+     },
+     "arc_share": 0,
+     "closed_outline": true,
+     "inner_closed": false,
+     "n_entities": 20
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-closet-rod-shelf-72（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-closet-rod-shelf-72",
+     "block": "CLOSET-ROD-SHELF-72",
+     "file": "furniture__nasji-closet-rod-shelf-72.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 609.6,
+      "long": 1828.8
+     },
+     "aspect": 3,
+     "hist": {
+      "LWPOLYLINE": 1,
+      "LINE": 16
+     },
+     "arc_share": 0,
+     "closed_outline": true,
+     "inner_closed": false,
+     "n_entities": 17
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-closet-rod-shelf-84（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-closet-rod-shelf-84",
+     "block": "CLOSET-ROD-SHELF-84",
+     "file": "furniture__nasji-closet-rod-shelf-84.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 609.6,
+      "long": 2133.6
+     },
+     "aspect": 3.5,
+     "hist": {
+      "LWPOLYLINE": 1,
+      "LINE": 18
+     },
+     "arc_share": 0,
+     "closed_outline": true,
+     "inner_closed": false,
+     "n_entities": 19
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-closet-rod-shelf-96（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-closet-rod-shelf-96",
+     "block": "CLOSET-ROD-SHELF-96",
+     "file": "furniture__nasji-closet-rod-shelf-96.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 609.6,
+      "long": 2438.4
+     },
+     "aspect": 4,
+     "hist": {
+      "LWPOLYLINE": 1,
+      "LINE": 20
+     },
+     "arc_share": 0,
+     "closed_outline": true,
+     "inner_closed": false,
+     "n_entities": 21
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-dresser-60（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-dresser-60",
+     "block": "DRESSER-60",
+     "file": "furniture__nasji-dresser-60.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 508,
+      "long": 1524
+     },
+     "aspect": 3,
+     "hist": {
+      "LWPOLYLINE": 2,
+      "LINE": 6
+     },
+     "arc_share": 0,
+     "closed_outline": true,
+     "inner_closed": false,
+     "n_entities": 8
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-file-cabinet（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-file-cabinet",
+     "block": "FILE-CABINET",
+     "file": "furniture__nasji-file-cabinet.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 381,
+      "long": 1209
+     },
+     "aspect": 3.17,
+     "hist": {
+      "LWPOLYLINE": 3,
+      "LINE": 4
+     },
+     "arc_share": 0,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 7
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-garage-storage-cabinet-36（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-garage-storage-cabinet-36",
+     "block": "GARAGE-STORAGE-CABINET-36",
+     "file": "furniture__nasji-garage-storage-cabinet-36.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 609.6,
+      "long": 914.4
+     },
+     "aspect": 1.5,
+     "hist": {
+      "LWPOLYLINE": 2,
+      "LINE": 6
+     },
+     "arc_share": 0,
+     "closed_outline": true,
+     "inner_closed": false,
+     "n_entities": 8
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-nightstand（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-nightstand",
+     "block": "NIGHTSTAND",
+     "file": "furniture__nasji-nightstand.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 457.2,
+      "long": 558.8
+     },
+     "aspect": 1.22,
+     "hist": {
+      "LWPOLYLINE": 2,
+      "LINE": 2
+     },
+     "arc_share": 0,
+     "closed_outline": true,
+     "inner_closed": false,
+     "n_entities": 4
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-pass-shelf-48（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/kitchen/nasji-pass-shelf-48",
+     "block": "PASS-SHELF-48",
+     "file": "kitchen__nasji-pass-shelf-48.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 355.6,
+      "long": 1219.2
+     },
+     "aspect": 3.43,
+     "hist": {
+      "LWPOLYLINE": 1,
+      "LINE": 4
+     },
+     "arc_share": 0,
+     "closed_outline": true,
+     "inner_closed": false,
+     "n_entities": 5
+    }
    }
   ]
  },
@@ -1233,6 +2204,33 @@ export const SYM_DICT = [
      "closed_outline": true,
      "inner_closed": true,
      "n_entities": 4
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-tub（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/bathroom/nasji-tub",
+     "block": "TUB",
+     "file": "bathroom__nasji-tub.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 762,
+      "long": 1524
+     },
+     "aspect": 2,
+     "hist": {
+      "LWPOLYLINE": 1,
+      "LINE": 6,
+      "ARC": 4,
+      "CIRCLE": 3
+     },
+     "arc_share": 0.5,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 14
     }
    }
   ]
@@ -1359,6 +2357,81 @@ export const SYM_DICT = [
      "closed_outline": true,
      "inner_closed": true,
      "n_entities": 5
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-bed-king（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-bed-king",
+     "block": "BED-KING",
+     "file": "furniture__nasji-bed-king.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 1930.4,
+      "long": 2032
+     },
+     "aspect": 1.05,
+     "hist": {
+      "LWPOLYLINE": 5,
+      "LINE": 5
+     },
+     "arc_share": 0,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 10
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-bed（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-bed",
+     "block": "BED",
+     "file": "furniture__nasji-bed.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 1524,
+      "long": 2108.2
+     },
+     "aspect": 1.38,
+     "hist": {
+      "LWPOLYLINE": 5,
+      "LINE": 5
+     },
+     "arc_share": 0,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 10
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-daybed-75x39（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-daybed-75x39",
+     "block": "DAYBED-75X39",
+     "file": "furniture__nasji-daybed-75x39.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 990.6,
+      "long": 1905
+     },
+     "aspect": 1.92,
+     "hist": {
+      "LWPOLYLINE": 5,
+      "LINE": 4
+     },
+     "arc_share": 0,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 9
     }
    }
   ]
@@ -1586,6 +2659,135 @@ export const SYM_DICT = [
      "inner_closed": true,
      "n_entities": 3
     }
+   },
+   {
+    "origin": "measured",
+    "label": "built-in-oven-plan-symbol（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/kitchen/built-in-oven-plan-symbol",
+     "block": "\\U+70E4\\U+7BB1",
+     "file": "kitchen__built-in-oven-plan-symbol.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 727.1,
+      "long": 885.5
+     },
+     "aspect": 1.22,
+     "hist": {
+      "LINE": 22,
+      "ARC": 4
+     },
+     "arc_share": 0.15,
+     "closed_outline": false,
+     "inner_closed": false,
+     "n_entities": 26
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-cooktop-30（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/kitchen/nasji-cooktop-30",
+     "block": "COOKTOP-30",
+     "file": "kitchen__nasji-cooktop-30.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 533.4,
+      "long": 762
+     },
+     "aspect": 1.43,
+     "hist": {
+      "LWPOLYLINE": 2,
+      "LINE": 9,
+      "CIRCLE": 12
+     },
+     "arc_share": 0.52,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 23
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-microwave（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/kitchen/nasji-microwave",
+     "block": "MICROWAVE",
+     "file": "kitchen__nasji-microwave.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 457.2,
+      "long": 609.6
+     },
+     "aspect": 1.33,
+     "hist": {
+      "LWPOLYLINE": 2,
+      "LINE": 4,
+      "CIRCLE": 1
+     },
+     "arc_share": 0.14,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 7
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-range-30（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/kitchen/nasji-range-30",
+     "block": "RANGE-30",
+     "file": "kitchen__nasji-range-30.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 635,
+      "long": 762
+     },
+     "aspect": 1.2,
+     "hist": {
+      "LWPOLYLINE": 2,
+      "LINE": 10,
+      "CIRCLE": 12
+     },
+     "arc_share": 0.5,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 24
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-range-commercial-36（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/kitchen/nasji-range-commercial-36",
+     "block": "RANGE-COMMERCIAL-36",
+     "file": "kitchen__nasji-range-commercial-36.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 812.8,
+      "long": 914.4
+     },
+     "aspect": 1.12,
+     "hist": {
+      "LWPOLYLINE": 2,
+      "LINE": 15,
+      "CIRCLE": 12
+     },
+     "arc_share": 0.41,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 29
+    }
    }
   ]
  },
@@ -1712,6 +2914,56 @@ export const SYM_DICT = [
      "inner_closed": true,
      "n_entities": 4
     }
+   },
+   {
+    "origin": "measured",
+    "label": "compact-two-seat-loveseat-plan（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/compact-two-seat-loveseat-plan",
+     "block": "A$C7C1D08AD",
+     "file": "furniture__compact-two-seat-loveseat-plan.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 992.8,
+      "long": 1281
+     },
+     "aspect": 1.29,
+     "hist": {
+      "LINE": 18,
+      "ARC": 4
+     },
+     "arc_share": 0.18,
+     "closed_outline": false,
+     "inner_closed": false,
+     "n_entities": 22
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-sectional-l-96（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/furniture/nasji-sectional-l-96",
+     "block": "SECTIONAL-L-96",
+     "file": "furniture__nasji-sectional-l-96.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 2438.4,
+      "long": 2438.4
+     },
+     "aspect": 1,
+     "hist": {
+      "LWPOLYLINE": 6,
+      "LINE": 7
+     },
+     "arc_share": 0,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 13
+    }
    }
   ]
  },
@@ -1774,6 +3026,165 @@ export const SYM_DICT = [
      "closed_outline": true,
      "inner_closed": true,
      "n_entities": 4
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-floor-sink（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/bathroom/nasji-floor-sink",
+     "block": "FLOOR-SINK",
+     "file": "bathroom__nasji-floor-sink.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 304.8,
+      "long": 304.8
+     },
+     "aspect": 1,
+     "hist": {
+      "LWPOLYLINE": 2,
+      "LINE": 4,
+      "CIRCLE": 1
+     },
+     "arc_share": 0.14,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 7
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-sink-kitchen-dbl（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/bathroom/nasji-sink-kitchen-dbl",
+     "block": "SINK-KITCHEN-DBL",
+     "file": "bathroom__nasji-sink-kitchen-dbl.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 558.8,
+      "long": 838.2
+     },
+     "aspect": 1.5,
+     "hist": {
+      "LWPOLYLINE": 4,
+      "LINE": 26,
+      "ARC": 16,
+      "CIRCLE": 4
+     },
+     "arc_share": 0.4,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 50
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-sink-kitchen-sgl（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/bathroom/nasji-sink-kitchen-sgl",
+     "block": "SINK-KITCHEN-SGL",
+     "file": "bathroom__nasji-sink-kitchen-sgl.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 558.8,
+      "long": 762
+     },
+     "aspect": 1.36,
+     "hist": {
+      "LWPOLYLINE": 4,
+      "LINE": 16,
+      "ARC": 8,
+      "CIRCLE": 2
+     },
+     "arc_share": 0.33,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 30
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "nasji-sink-mop（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/bathroom/nasji-sink-mop",
+     "block": "SINK-MOP",
+     "file": "bathroom__nasji-sink-mop.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 609.6,
+      "long": 609.6
+     },
+     "aspect": 1,
+     "hist": {
+      "LWPOLYLINE": 3,
+      "LINE": 16,
+      "ARC": 8,
+      "CIRCLE": 2
+     },
+     "arc_share": 0.34,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 29
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "double-bowl-kitchen-sink-plan（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/kitchen/double-bowl-kitchen-sink-plan",
+     "block": "A$C678E413C",
+     "file": "kitchen__double-bowl-kitchen-sink-plan.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 815,
+      "long": 865.3
+     },
+     "aspect": 1.06,
+     "hist": {
+      "LINE": 37,
+      "CIRCLE": 5,
+      "ARC": 36
+     },
+     "arc_share": 0.53,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 78
+    }
+   },
+   {
+    "origin": "measured",
+    "label": "unequal-double-bowl-sink-plan（nasji実測）",
+    "source": {
+     "license": "Free for commercial use (nasji.com FAQ, 2026-11-19確認)",
+     "ref": "https://nasji.com/cad-blocks/kitchen/unequal-double-bowl-sink-plan",
+     "block": "A$C30C52308",
+     "file": "kitchen__unequal-double-bowl-sink-plan.dxf"
+    },
+    "features": {
+     "size_mm": {
+      "short": 450,
+      "long": 815
+     },
+     "aspect": 1.81,
+     "hist": {
+      "LINE": 35,
+      "CIRCLE": 5,
+      "ARC": 36
+     },
+     "arc_share": 0.54,
+     "closed_outline": true,
+     "inner_closed": true,
+     "n_entities": 76
     }
    }
   ]
