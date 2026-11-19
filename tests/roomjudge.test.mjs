@@ -44,3 +44,57 @@ test('根拠が無ければ「まだ分からない」', () => {
   assert.equal(r.counts.unknown, 2);
   assert.equal(r.counts.room, 0);
 });
+
+test('ゾーンの根拠：部屋名のゾーンに入った区画は部屋と認識できる', () => {
+  const r = judgeRooms([face(1, 0, 0, 3, 3), face(2, 5, 0, 3, 3)], { zones: [{ name: '事務室', faces: [2] }] });
+  assert.equal(r.map[2], 'room');
+  assert.deepEqual(r.why[2], ['ゾーン']);
+  assert.equal(r.map[1], 'unknown');
+  assert.equal(r.counts.room, 1);
+  assert.equal(r.counts.unknown, 1);
+});
+
+test('ゾーンの根拠は印を上書きしない（除外・保留が先）', () => {
+  const r = judgeRooms(
+    [face(1, 0, 0, 3, 3), face(2, 5, 0, 3, 3)],
+    { marks: { 1: { s: 'out', type: 'table' }, 2: { s: 'hold', type: 'ring' } }, zones: [{ name: '事務室', faces: [1, 2] }] });
+  assert.equal(r.map[1], 'out');
+  assert.equal(r.map[2], 'hold');
+});
+
+test('ゾーンの根拠：名前の無いゾーンで部屋と同居すると「決めきれない」まで', () => {
+  const r = judgeRooms(
+    [face(1, 0, 0, 3, 3), face(2, 5, 0, 3, 3)],
+    { fixtures: [{ b: [1, 1, 1.5, 1.5] }], zones: [{ name: '', faces: [1, 2] }] });
+  assert.equal(r.map[1], 'room');
+  assert.equal(r.map[2], 'hold');
+});
+
+test('ゾーンの根拠：仕上げ・天井高の注記だけが名前のゾーンは「決めきれない」まで（同居があっても部屋にはしない）', () => {
+  const r = judgeRooms(
+    [face(1, 0, 0, 3, 3), face(2, 5, 0, 3, 3), face(3, 10, 0, 3, 3)],
+    { fixtures: [{ b: [1, 1, 1.5, 1.5] }], zones: [{ name: 'CH=3000', faces: [1, 2] }, { name: '壁：クロス', faces: [3] }] });
+  assert.equal(r.map[2], 'hold');
+  assert.equal(r.map[3], 'hold');
+});
+
+test('ゾーンの根拠：名前のあるゾーンで部屋と同居すれば部屋と認識できる', () => {
+  const r = judgeRooms(
+    [face(1, 0, 0, 3, 3), face(2, 5, 0, 3, 3)],
+    { fixtures: [{ b: [1, 1, 1.5, 1.5] }], zones: [{ name: 'エリア', faces: [1, 2] }] });
+  assert.equal(r.map[2], 'room');
+});
+
+test('ゾーンの根拠：「事務所棟」は部屋名として扱わない', () => {
+  const r = judgeRooms([face(1, 0, 0, 3, 3)], { zones: [{ name: '事務所棟', faces: [1] }] });
+  assert.equal(r.map[1], 'unknown');
+});
+
+test('ゾーンを渡さなければ従来と完全に同じ', () => {
+  const faces = [face(1, 0, 0, 3, 3, { name: '事務室' }), face(2, 5, 0, 3, 3), face(3, 10, 0, 3, 3)];
+  const args = { marks: { 3: { s: 'out', type: 'frame' } }, fixtures: [{ b: [6, 1, 6.5, 1.5] }] };
+  const a = judgeRooms(faces, args);
+  const b = judgeRooms(faces, { ...args, zones: [] });
+  assert.deepEqual(b.map, a.map);
+  assert.deepEqual(b.counts, a.counts);
+});

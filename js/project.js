@@ -442,10 +442,12 @@ const rjCache = new WeakMap();
 function roomJudge(d) {
   if (!d || !d.plan || !d.plan.faces) return null;
   const c = rjCache.get(d);
-  if (c && c.faces === d.plan.faces && c.analysis === d.analysis && c.fixtures === d.fixtures && c.doors === d.doors) return c.r;
+  /* ゾーンは名前の付け替え等でその場で書き換わるので、配列の同一性ではなく署名で比べる */
+  const zsig = (d.zones || []).map(z => `${z.id || ''}|${z.name || ''}|${(z.faces || []).length}`).join(';');
+  if (c && c.faces === d.plan.faces && c.analysis === d.analysis && c.fixtures === d.fixtures && c.doors === d.doors && c.zsig === zsig) return c.r;
   const A = d.analysis || {};
-  const r = judgeRooms(d.plan.faces, { marks: A.marks || {}, names: A.names || {}, fixtures: d.fixtures || [], doors: d.doors || [] });
-  rjCache.set(d, { faces: d.plan.faces, analysis: d.analysis, fixtures: d.fixtures, doors: d.doors, r });
+  const r = judgeRooms(d.plan.faces, { marks: A.marks || {}, names: A.names || {}, fixtures: d.fixtures || [], doors: d.doors || [], zones: d.zones || [] });
+  rjCache.set(d, { faces: d.plan.faces, analysis: d.analysis, fixtures: d.fixtures, doors: d.doors, zsig, r });
   return r;
 }
 function roomJudgeEntries(d) {
@@ -458,7 +460,7 @@ function roomSummary(d) {
   const c = r.counts;
   return `<div class="row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)"><b class="small">部屋の見分け（現段階）</b>
     ${['room', 'hold', 'out', 'unknown'].map(k => `<span class="pill" style="border:1px solid ${ROOM_JUDGE[k].color};color:${ROOM_JUDGE[k].color}">${ROOM_JUDGE[k].name} ${c[k]}</span>`).join('')}
-    <span class="small muted">全 ${c.total} 区画。緑は名前・器具・ドアの根拠がある区画です。色は図面の「室」ボタンで消せます。部屋・見積には影響しません</span></div>`;
+    <span class="small muted">全 ${c.total} 区画。緑は名前・器具・ドア・ゾーンの根拠がある区画です。色は図面の「室」ボタンで消せます。部屋・見積には影響しません</span></div>`;
 }
 
 function fixSummary(d) {
