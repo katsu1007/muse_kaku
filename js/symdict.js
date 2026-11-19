@@ -3249,8 +3249,10 @@ export function classifyBox(b, userDict = []) {
 
 /* 線の集まりから切り出した形（js/furndetect.js の候補）を判定する。
  * f: { short, long（mm）, arcShare, closed, dividers }。自分の辞書が最優先（寸法で照合）。
+ * ctx（任意）: buildChairContexts が作る文脈。ある時だけ、椅子の「類似」を文脈で確定に上げる。
+ * ctx が無い時の戻り値は従来と完全に同じ。
  * 戻り値は classifyBox と同じ形 */
-export function classifyCluster(f, userDict = []) {
+export function classifyCluster(f, userDict = [], ctx = null) {
   const short = f && f.short, long = f && f.long;
   if (!(short > 0) || !(long > 0)) return { verdict: "unknown", category: null, score: 0, short: 0, long: 0 };
   for (const u of userDict || []) {
@@ -3261,8 +3263,97 @@ export function classifyCluster(f, userDict = []) {
   }
   const r = classifySymbol({ short, long, arcShare: f.arcShare != null ? f.arcShare : null, closed: f.closed != null ? f.closed : null, innerClosed: null, dividers: f.dividers != null ? f.dividers : null });
   if (r.result === "不明") return { verdict: "unknown", category: null, score: r.score, short, long };
-  if (r.result === "要確認") return { verdict: "near", category: r.category, score: r.score, short, long };
+  if (r.result === "要確認") return promoteChair({ verdict: "near", category: r.category, score: r.score, short, long }, ctx);
   return { verdict: "hit", category: r.result, score: r.score, short, long };
+}
+
+/* ===== 椅子の文脈判定（2026-11-19） =====
+ * 椅子は平面の形が洗面器・小便器とほぼ同じで、形だけでは「類似（僅差）」止まりになる
+ * （実図面5件で類似止まり175件・確定は僅か）。2026-11-18 の合意どおり、文脈は
+ * 「形の判定が僅差の時だけ、その決着に使う」。はっきりした形の判定は文脈で覆さない。
+ * 実図面での測定（~/workspace/kaku/work/yardstick/chair_ctx_analysis*.mjs）で決めた条件：
+ *   - 形のスコアが 0.95 以上（175件の実候補は全て 0.979 以上。形そのものが弱い物は救わない）
+ *   - 支持：確定した机・デスクの縁まで 0.6m 以内／同じ寸法の椅子候補が 2m 以内に2件以上
+ *     （机に付く・列をなす、が実椅子の姿）／属するゾーンの名前が事務・会議などの部屋名
+ *   - 水回りの文脈が先に効く（上げない）：ゾーン名が水回り／小さい区画（15㎡以下）の中に
+ *     水回りの文字（便・洗・湯・浴・トイレ等）がある／2m 以内に水回りの文字がある／
+ *     便器・小便器の器具の縁まで 0.5m 以内
+ * 昇格した判定には context: "chair" を付ける（画面で「文脈で確定」と分かるように）。 */
+export const CHAIR_CTX_FLOOR = 0.95;
+const CHAIR_DESK_MAX = 0.6;      /* 机の縁までの距離（m） */
+const CHAIR_REP_MIN = 2;         /* 同じ寸法の椅子候補がこの件数以上、近くにあれば「列」 */
+const CHAIR_REP_R = 2.0;         /* 反復を数える半径（m） */
+const CHAIR_REP_TOL = 45;        /* 「同じ寸法」と見る許容（mm） */
+const CHAIR_WET_TEXT_MAX = 2.0;  /* 水回りの文字がこの距離（m）以内にあれば水回り文脈 */
+const CHAIR_SAN_MAX = 0.5;       /* 便器・小便器の縁までの距離（m） */
+const CHAIR_FACE_WET_MAX = 15;   /* 区画内の文字で水回りと見る区画の大きさ上限（㎡） */
+const WET_NAME_RE = /便|洗|湯|浴|トイレ|厠|WC/i;
+const OFFICE_NAME_RE = /事務|会議|応接|社長|役員|食堂|待合|休憩|ロビー|受付|打合|ミーティング|控室|談話|教室|研修|執務|講義|実習室|図書/;
+const SAN_TYPES = new Set(['toilet', 'urinal']);
+
+const pipC = (x, y, P) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const a = P[i], b = P[j]; if ((a[1] > y) !== (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]) c = !c; } return c; };
+const polyAreaC = P => { let a = 0; for (let i = 0, j = P.length - 1; i < P.length; j = i++) a += (P[j][0] + P[i][0]) * (P[j][1] - P[i][1]); return Math.abs(a / 2); };
+const edgeDistC = (a, b) => { const dx = Math.max(0, Math.max(a[0] - b[2], b[0] - a[2])); const dy = Math.max(0, Math.max(a[1] - b[3], b[1] - a[3])); return Math.hypot(dx, dy); };
+
+/* 素の判定 r に文脈 ctx を適用する。昇格する時だけ新しいオブジェクトを返し、それ以外は r をそのまま返す */
+export function promoteChair(r, ctx) {
+  if (!ctx || !r || r.mine || r.verdict !== 'near' || r.category !== '椅子') return r;
+  if (!(r.score >= CHAIR_CTX_FLOOR)) return r;
+  if (ctx.wet) return r;
+  if (ctx.desk || ctx.rep || ctx.office) return { ...r, verdict: 'hit', context: 'chair' };
+  return r;
+}
+
+/* 候補全体（clusters と、その素の判定 base）と周囲の情報 env から、椅子候補ごとの文脈を作る。
+ * env: { zones: [{name, faces:[区画の i]}], faces: [{i, poly}], fixtures: [{b, t}], texts: [{t| s, x, y}] }
+ * 戻り値: clusters と同じ並びの配列（椅子の「類似」候補以外は null） */
+export function buildChairContexts(clusters, base, env = {}) {
+  const out = new Array((clusters || []).length).fill(null);
+  if (!clusters || !clusters.length) return out;
+  const zones = env.zones || [], faces = env.faces || [], fixtures = env.fixtures || [], texts = env.texts || [];
+  const candIdx = [], deskIdx = [];
+  clusters.forEach((x, j) => {
+    if (!x || !x.b || !base || !base[j]) return;
+    if (base[j].verdict === 'near' && base[j].category === '椅子') candIdx.push(j);
+    if (base[j].verdict === 'hit' && base[j].category === '机・デスク') deskIdx.push(j);
+  });
+  if (!candIdx.length) return out;
+  const faceArea = faces.map(f => (f && f.poly && f.poly.length >= 3) ? polyAreaC(f.poly) : null);
+  const faceZone = new Map();
+  zones.forEach(z => { for (const i of (z && z.faces) || []) if (!faceZone.has(i)) faceZone.set(i, z); });
+  const wetTexts = texts.filter(t => t && WET_NAME_RE.test(String(t.t != null ? t.t : (t.s || ''))));
+  const san = fixtures.filter(f => f && f.b && SAN_TYPES.has(f.t));
+  for (const j of candIdx) {
+    const x = clusters[j], cx = (x.b[0] + x.b[2]) / 2, cy = (x.b[1] + x.b[3]) / 2;
+    let deskDist = null;
+    for (const k of deskIdx) { const d = edgeDistC(x.b, clusters[k].b); if (deskDist == null || d < deskDist) deskDist = d; }
+    let rep = 0;
+    for (const k of candIdx) {
+      if (k === j) continue; const o = clusters[k];
+      if (Math.abs(o.short - x.short) > CHAIR_REP_TOL || Math.abs(o.long - x.long) > CHAIR_REP_TOL) continue;
+      if (Math.hypot((o.b[0] + o.b[2]) / 2 - cx, (o.b[1] + o.b[3]) / 2 - cy) <= CHAIR_REP_R) rep++;
+    }
+    /* 属する区画（一番小さい物）と、そのゾーン */
+    let face = null, faceI = -1;
+    faces.forEach((f, fi) => { if (f && f.poly && f.poly.length >= 3 && faceArea[fi] != null && pipC(cx, cy, f.poly) && (face == null || faceArea[fi] < faceArea[faceI])) { face = f; faceI = fi; } });
+    const zone = face ? faceZone.get(face.i != null ? face.i : faceI) : null;
+    let wet = false;
+    if (zone && WET_NAME_RE.test(String(zone.name || ''))) wet = true;
+    if (!wet && face && faceArea[faceI] <= CHAIR_FACE_WET_MAX) {
+      for (const t of wetTexts) { if (pipC(+t.x, +t.y, face.poly)) { wet = true; break; } }
+    }
+    if (!wet) for (const t of wetTexts) { if (Math.hypot(+t.x - cx, +t.y - cy) <= CHAIR_WET_TEXT_MAX) { wet = true; break; } }
+    if (!wet) for (const f of san) { if (edgeDistC(x.b, f.b) <= CHAIR_SAN_MAX) { wet = true; break; } }
+    out[j] = {
+      desk: deskDist != null && deskDist <= CHAIR_DESK_MAX,
+      rep: rep >= CHAIR_REP_MIN,
+      office: !!(zone && OFFICE_NAME_RE.test(String(zone.name || ''))),
+      wet,
+      deskDist: deskDist == null ? null : Math.round(deskDist * 100) / 100,
+      repCount: rep
+    };
+  }
+  return out;
 }
 
 /* 戻り値: { result: カテゴリ名 | "要確認" | "不明", score, category, label } */

@@ -115,3 +115,93 @@ test('同寸法が複数カテゴリにある形（550×600）は確定せず類
   const r = classifyBox([0, 0, 0.55, 0.6]);
   assert.equal(r.verdict, 'near');
 });
+
+/* 椅子の文脈判定：形が僅差（類似）の時だけ、周囲の根拠で確定に上げる。文脈が無ければ従来と同一 */
+import { classifyCluster, buildChairContexts, promoteChair, CHAIR_CTX_FLOOR } from '../js/symdict.js';
+
+/* 実図面の椅子候補と同じ特徴（545×571・円弧0.89）: 形だけでは洗面器と僅差で「類似：椅子」 */
+const chairCand = (x, y) => ({ b: [x, y, x + 0.545, y + 0.571], short: 545, long: 571, arcShare: 0.89, closed: true, dividers: 0 });
+const deskCand = (x, y) => ({ b: [x, y, x + 1.2, y + 0.7], short: 700, long: 1200, arcShare: 0, closed: true, dividers: 1 });
+const ctxFor = (clusters, env = {}) => {
+  const base = clusters.map(c => classifyCluster(c, []));
+  const ctxs = buildChairContexts(clusters, base, env);
+  return clusters.map((c, j) => (ctxs[j] ? classifyCluster(c, [], ctxs[j]) : base[j]));
+};
+
+test('文脈なし（ctx=null）は従来の判定と完全に同じ', () => {
+  const f = chairCand(0, 0);
+  const a = classifyCluster(f, []);
+  assert.equal(a.verdict, 'near');
+  assert.equal(a.category, '椅子');
+  assert.deepEqual(classifyCluster(f, [], null), a);
+  assert.equal(a.context, undefined);
+});
+
+test('確定した机のそばにある椅子候補は、文脈で確定になる', () => {
+  const clusters = [chairCand(0, 0), deskCand(0, 0.62)]; /* 机の縁まで 0.05m */
+  const r = ctxFor(clusters);
+  assert.equal(r[0].verdict, 'hit');
+  assert.equal(r[0].category, '椅子');
+  assert.equal(r[0].context, 'chair');
+  assert.equal(r[1].verdict, 'hit');
+  assert.equal(r[1].category, '机・デスク');
+  assert.equal(r[1].context, undefined); /* 机自身は文脈で変わらない */
+});
+
+test('同じ寸法の椅子候補が列をなしていれば、机が無くても確定になる', () => {
+  const clusters = [chairCand(0, 0), chairCand(0.7, 0), chairCand(1.4, 0)];
+  const r = ctxFor(clusters);
+  assert.ok(r.every(x => x.verdict === 'hit' && x.category === '椅子' && x.context === 'chair'));
+});
+
+test('水回りの文字が近くにある椅子候補は、机がそばでも上げない', () => {
+  const clusters = [chairCand(0, 0), deskCand(0, 0.62)];
+  const r = ctxFor(clusters, { texts: [{ t: '便', x: 0.3, y: 1.6 }] }); /* 椅子の中心から約1.3m */
+  assert.equal(r[0].verdict, 'near');
+  assert.equal(r[0].context, undefined);
+});
+
+test('水回りの名前のゾーンに入っている椅子候補は上げない', () => {
+  const clusters = [chairCand(0, 0), deskCand(0, 0.62)];
+  const faces = [{ i: 0, poly: [[-1, -1], [3, -1], [3, 3], [-1, 3]] }];
+  const zones = [{ name: '男子トイレ', faces: [0] }];
+  const r = ctxFor(clusters, { faces, zones });
+  assert.equal(r[0].verdict, 'near');
+});
+
+test('便器・小便器の器具に接している椅子候補は上げない', () => {
+  const clusters = [chairCand(0, 0), deskCand(0, 0.62)];
+  const fixtures = [{ b: [0.6, 0, 1.0, 0.45], t: 'urinal' }]; /* 椅子の縁まで 0.05m */
+  const r = ctxFor(clusters, { fixtures });
+  assert.equal(r[0].verdict, 'near');
+});
+
+test('事務室のゾーンに入っている椅子候補は、机も列も無くてよい', () => {
+  const clusters = [chairCand(0, 0)];
+  const faces = [{ i: 0, poly: [[-1, -1], [3, -1], [3, 3], [-1, 3]] }];
+  const zones = [{ name: '事務室', faces: [0] }];
+  const r = ctxFor(clusters, { faces, zones });
+  assert.equal(r[0].verdict, 'hit');
+  assert.equal(r[0].context, 'chair');
+});
+
+test('形のスコアが下限未満なら、文脈があっても上げない', () => {
+  const ctx = { desk: true, rep: true, office: true, wet: false };
+  const low = { verdict: 'near', category: '椅子', score: CHAIR_CTX_FLOOR - 0.01, short: 545, long: 571 };
+  assert.equal(promoteChair(low, ctx).verdict, 'near');
+  const ok = { verdict: 'near', category: '椅子', score: 0.99, short: 545, long: 571 };
+  const up = promoteChair(ok, ctx);
+  assert.equal(up.verdict, 'hit');
+  assert.equal(up.context, 'chair');
+});
+
+test('文脈で変えるのは「類似：椅子」だけ（確定済み・他の類似はそのまま）', () => {
+  const ctx = { desk: true, rep: true, office: true, wet: false };
+  const hit = { verdict: 'hit', category: '椅子', score: 0.99, short: 545, long: 571 };
+  assert.equal(promoteChair(hit, ctx), hit);
+  const uri = { verdict: 'near', category: '小便器', score: 0.99, short: 450, long: 500 };
+  assert.equal(promoteChair(uri, ctx), uri);
+  const wetCtx = { desk: true, rep: true, office: true, wet: true };
+  const chair = { verdict: 'near', category: '椅子', score: 0.99, short: 545, long: 571 };
+  assert.equal(promoteChair(chair, wetCtx), chair);
+});
