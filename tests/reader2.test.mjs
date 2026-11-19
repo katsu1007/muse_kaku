@@ -132,6 +132,17 @@ test('文字：整える・種類に分ける', () => {
   assert.equal(classify('CS232B+SH232BA(TOTO)'), 'model'); assert.equal(classify('大便器'), 'item'); assert.equal(classify('事務室'), 'room'); assert.equal(classify('備考'), 'other');
 });
 
+test('文字：「〜室」で終わる部屋名に役職の言葉（作成・設計など）が混ざっても部屋名。表題欄の役職は従来通り', () => {
+  /* 実図面（日本モウルド）の部屋名。「作成」を含むため以前は表題欄に誤分類されていた */
+  assert.equal(classify('金型作成室'), 'room'); assert.equal(classify('金型作成室（手前）'), 'room'); assert.equal(classify('金型作成室（奥）'), 'room');
+  /* 同じ誤りの仲間：〜室で終わる作業部屋の名前 */
+  assert.equal(classify('設計室'), 'room'); assert.equal(classify('製図室'), 'room'); assert.equal(classify('検図室'), 'room'); assert.equal(classify('作成室'), 'room');
+  /* 表題欄の役職・見出しは title のまま（室で終わらない物、役職以外のキーワードを含む物） */
+  assert.equal(classify('作成者'), 'title'); assert.equal(classify('作成日'), 'title'); assert.equal(classify('作成図'), 'title'); assert.equal(classify('作 成'), 'title');
+  assert.equal(classify('設計'), 'title'); assert.equal(classify('製図'), 'title'); assert.equal(classify('検図'), 'title'); assert.equal(classify('承 認'), 'title');
+  assert.equal(classify('縮尺は未入力'), 'title'); assert.equal(classify('構造図作成前'), 'title'); assert.equal(classify('承認図面'), 'title');
+});
+
 test('文字：表の中の器具の名前と、同じ行の品番を組にする（表の外の文字は使わない）', () => {
   const T = [{ t: '大便器', x: 1, y: 5 }, { t: 'CS232B+SH232BA(TOTO)', x: 2.5, y: 5.02 }, { t: '小便器', x: 1, y: 4.3 }, { t: 'UFH507CR', x: 2.5, y: 4.3 }, { t: '紙巻器', x: 1, y: 3.6 },
     { t: '大便器', x: 20, y: 5 }, { t: 'XX999', x: 21, y: 5 }];

@@ -9,6 +9,11 @@
 import { ROOMISH_RE } from './frame.js';
 
 const TITLE_RE = /工事名|図面名|図\s*番|縮\s*尺|SCALE|DATE|承\s*認|設\s*計|製\s*図|検\s*図|作\s*成|TITLE/i;
+/* 「金型作成室」「設計室」のように、表題欄の役職の言葉（作成・設計・製図・検図）を含んでいても
+ * 「〜室」で終わる部屋名は部屋名として扱う。役職以外の表題欄キーワード（工事名・縮尺・承認など）を
+ * 含む物と、「作成者」「作成日」「作成図」のような室で終わらない物は、従来通り表題欄の言葉にする */
+const TITLE_HARD_RE = /工事名|図面名|図\s*番|縮\s*尺|SCALE|DATE|承\s*認|TITLE/i;
+const ROOM_END_RE = /室(?:[（(][^（）()]*[）)])?$/;
 const CH_RE = /CH\s*[=＝:：]?\s*[≒≈]?\s*\d/i;
 /* 品番らしい文字：英字と数字が続く（CS232B、UFH507CR、TCF6624 など）。メーカー名が括弧で付く物も */
 export const MODEL_RE = /[A-Z]{1,}[0-9]{2,}|[0-9]{2,}[A-Z]{1,}|[（(](TOTO|LIXIL|INAX|パナソニック|Panasonic|三菱|コマニー|サンゲツ|東リ)[）)]/;
@@ -23,7 +28,10 @@ export const normalizeText = s => String(s ?? '')
 export function classify(t) {
   const n = String(t || '');
   if (CH_RE.test(n)) return 'ch';
-  if (TITLE_RE.test(n)) return 'title';
+  if (TITLE_RE.test(n)) {
+    /* 「〜室」で終わる部屋名に役職の言葉が混ざる物（金型作成室など）は表題欄にしない。部屋名の判定に進む */
+    if (!(n.length <= 16 && ROOMISH_RE.test(n) && ROOM_END_RE.test(n) && !TITLE_HARD_RE.test(n))) return 'title';
+  }
   if (DIM_RE.test(n.replace(/\s/g, ''))) return 'dim';
   if (MODEL_RE.test(n)) return 'model';
   if (ITEM_RE.test(n)) return 'item';
