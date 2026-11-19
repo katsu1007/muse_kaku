@@ -141,6 +141,68 @@ test('ゾーンを渡さなければ従来と完全に同じ', () => {
   assert.deepEqual(b.counts, a.counts);
 });
 
+test('器具の近く：区画の外にある水回り器具から0.5m以内の小さい区画は部屋と認識できる', () => {
+  /* 便器はどの区画にも入っていない（区画が取れなかった場所に器具だけ残った状態） */
+  const r = judgeRooms([face(1, 3, 0, 1.5, 1.5), face(2, 8, 0, 2, 2)], {
+    fixtures: [{ t: 'toilet', b: [2.3, 0.4, 2.9, 1.4] }]   /* 区画1の縁から0.1m */
+  });
+  assert.equal(r.map[1], 'room');
+  assert.deepEqual(r.why[1], ['器具']);
+  assert.equal(r.map[2], 'unknown');
+});
+
+test('器具の近く：0.5mより遠い器具は根拠にならない', () => {
+  const r = judgeRooms([face(1, 3, 0, 1.5, 1.5)], {
+    fixtures: [{ t: 'urinal', b: [1.4, 0.4, 2.0, 1.4] }]   /* 縁から1.0m */
+  });
+  assert.equal(r.map[1], 'unknown');
+});
+
+test('器具の近く：大きい区画（6㎡超）は開けた床とみて対象にしない', () => {
+  const r = judgeRooms([face(1, 3, 0, 3, 3)], {
+    fixtures: [{ t: 'counter', b: [2.4, 1, 2.95, 2] }]   /* 縁から0.05mだが区画は9㎡ */
+  });
+  assert.equal(r.map[1], 'unknown');
+});
+
+test('器具の近く：水回りでない器具（浴槽・キッチン・種類なし）は根拠にならない', () => {
+  const fx = t => (t ? [{ t, b: [2.3, 0.4, 2.9, 1.4] }] : [{ b: [2.3, 0.4, 2.9, 1.4] }]);
+  for (const t of ['bath', 'kitchen', null]) {
+    const r = judgeRooms([face(1, 3, 0, 1.5, 1.5)], { fixtures: fx(t) });
+    assert.equal(r.map[1], 'unknown', `t=${t}`);
+  }
+  const r2 = judgeRooms([face(1, 3, 0, 1.5, 1.5)], { fixtures: [{ t: 'sink', b: [2.3, 0.4, 2.9, 1.4] }] });
+  assert.equal(r2.map[1], 'room');   /* 手洗器は水回り */
+});
+
+test('器具の近く：会社名スタンプのゾーンの区画は対象にしない', () => {
+  const r = judgeRooms([face(1, 3, 0, 1.5, 1.5)], {
+    fixtures: [{ t: 'sink', b: [2.3, 0.4, 2.9, 1.4] }],
+    zones: [{ name: '都市開発事業本部一級建築士事務所', faces: [1] }]
+  });
+  assert.equal(r.map[1], 'unknown');
+});
+
+test('器具の近く：表の中（除外の印の区画）にある器具は根拠にならない', () => {
+  const table = face(1, 0, 0, 3, 3);
+  const small = face(2, 3.3, 1, 1.2, 1.2);
+  const r = judgeRooms([table, small], {
+    marks: { 1: { s: 'out', type: 'table' } },
+    fixtures: [{ t: 'toilet', b: [2.2, 1, 2.8, 2] }]   /* 表の区画の中。区画2の縁から0.5m */
+  });
+  assert.equal(r.map[1], 'out');
+  assert.equal(r.map[2], 'unknown');
+});
+
+test('器具の近く：印のある区画（保留・除外）は上書きしない', () => {
+  const r = judgeRooms([face(1, 3, 0, 1.5, 1.5), face(2, 6, 0, 1.5, 1.5)], {
+    marks: { 1: { s: 'hold', type: 'ring' }, 2: { s: 'out', type: 'frame' } },
+    fixtures: [{ t: 'toilet', b: [2.3, 0.4, 2.9, 1.4] }, { t: 'toilet', b: [5.3, 0.4, 5.9, 1.4] }]
+  });
+  assert.equal(r.map[1], 'hold');
+  assert.equal(r.map[2], 'out');
+});
+
 test('文字を渡さなければ従来と完全に同じ', () => {
   const faces = [face(1, 0, 0, 3, 3), face(2, 5, 0, 3, 3)];
   const args = { fixtures: [{ b: [6, 1, 6.5, 1.5] }] };

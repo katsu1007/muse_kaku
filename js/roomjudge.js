@@ -15,7 +15,12 @@
  * 区画の中にあれば、その区画（を含む一番小さい区画）の「名前」の根拠になる。どの区画にも
  * 入らなかった部屋名は、0.5m 以内の縁にある区画の根拠にする（3段目。名前はその部屋の床に
  * 書かれるもので、0.5m を超えると隣の空間との境が曖昧になるため、そこで止める）。
- * 会社名のスタンプ（「一級建築士」「建築士事務所」を含む名前）は部屋名として扱わない。 */
+ * 会社名のスタンプ（「一級建築士」「建築士事務所」を含む名前）は部屋名として扱わない。
+ * 区画が取れず器具だけが面の外に残った図面（混在レイヤーなど）のため、最後に器具の近さも
+ * 見る（4段目）：水回りの器具（便器・小便器・洗面・手洗）が縁から 0.5m 以内にある小さい
+ * 区画（6㎡以下）は、その水回りの部屋の床の断片とみる。大きい区画は開けた床が器具に接して
+ * いるだけのことが多いので対象にしない。表の中（除外の印の区画）にある器具と、会社名
+ * スタンプのゾーンの区画は根拠にしない。 */
 
 import { classify, joinTexts } from './reader2/text.js';
 
@@ -148,6 +153,65 @@ export function judgeRooms(faces = [], { marks = {}, names = {}, fixtures = [], 
         let d = Infinity;
         for (let k = 0; k < f.poly.length; k++) d = Math.min(d, segDist(t.x, t.y, f.poly[k], f.poly[(k + 1) % f.poly.length]));
         if (d <= 0.5) { counts.unknown--; counts.room++; map[f.i] = 'room'; why[f.i] = ['名前']; break; }
+      }
+    }
+  }
+
+  /* 4段目：器具の近く。区画が取れなかった場所に水回りの器具だけが残っている図面では、
+   * 器具の入っている区画が無い（または巨大な区画に横取りされる）ため、1段目の根拠が
+   * 付かない。その器具のすぐ周りの小さい区画は、その水回りの部屋の床の断片とみる。
+   * 距離は器具の外形（bbox）と区画の縁の間。0.5m は名前の近さ（3段目）と同じ物差しで、
+   * 実測でも 0.5m までに器具に張り付いた断片が集まり、それより先はまばらになる。
+   * 条件：水回りの器具だけ（便器・小便器・洗面・手洗。浴槽・キッチンは水回りの部屋の
+   * 決め手にならないので入れない）／区画は 6㎡以下（それより大きい物は開けた床が器具に
+   * 接しているだけのことが多い）／会社名スタンプのゾーンの区画は除く（スタンプの周りの
+   * 断片を部屋にしない）／器具の入っている一番小さい区画が「部屋ではない」（表の中など）
+   * なら、その器具は根拠にしない。印と直接・ゾーン・名前の根拠は上書きしない */
+  const WET = new Set(['toilet', 'urinal', 'counter', 'sink']);
+  const wetFx = (fixtures || []).filter(x => x && x.b && WET.has(x.t));
+  if (wetFx.length) {
+    const segDist = (px, py, a, b) => {
+      const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy;
+      let t = L2 ? ((px - a[0]) * dx + (py - a[1]) * dy) / L2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      return Math.hypot(px - (a[0] + t * dx), py - (a[1] + t * dy));
+    };
+    const segSeg = (a, b, c, d) => {
+      const o = (p, q, r) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+      const d1 = o(c, d, a), d2 = o(c, d, b), d3 = o(a, b, c), d4 = o(a, b, d);
+      if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return 0;
+      return Math.min(segDist(a[0], a[1], c, d), segDist(b[0], b[1], c, d), segDist(c[0], c[1], a, b), segDist(d[0], d[1], a, b));
+    };
+    /* 区画（領域）と器具の外形（矩形）の距離。重なれば 0 */
+    const faceFxDist = (f, b) => {
+      const cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+      if (pip(cx, cy, f.poly)) return 0;
+      const cn = [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]];
+      for (const c of cn) if (pip(c[0], c[1], f.poly)) return 0;
+      for (const v of f.poly) if (v[0] >= b[0] && v[0] <= b[2] && v[1] >= b[1] && v[1] <= b[3]) return 0;
+      let d = Infinity;
+      for (let k = 0; k < f.poly.length; k++) {
+        const a = f.poly[k], q = f.poly[(k + 1) % f.poly.length];
+        for (let e = 0; e < 4; e++) d = Math.min(d, segSeg(a, q, cn[e], cn[(e + 1) % 4]));
+      }
+      return d;
+    };
+    /* 器具の持ち主（中心を含む一番小さい区画）が「部屋ではない」器具は表の中の物として除く */
+    const usable = wetFx.filter(x => {
+      const o = smallestAt((x.b[0] + x.b[2]) / 2, (x.b[1] + x.b[3]) / 2);
+      return !o || map[o.i] !== 'out';
+    });
+    const faceZone = new Map();
+    if (zones && zones.length) for (const z of zones) for (const i of (z && z.faces) || []) if (!faceZone.has(i)) faceZone.set(i, z);
+    for (const f of F) {
+      if (map[f.i] !== 'unknown') continue;
+      if (!(f.area > 0) || f.area > 6) continue;
+      const z = faceZone.get(f.i);
+      if (z && STAMP_RE.test(String(z.name || ''))) continue;
+      const b = bbox.get(f.i);
+      for (const x of usable) {
+        if (x.b[0] > b[2] + 0.5 || x.b[2] < b[0] - 0.5 || x.b[1] > b[3] + 0.5 || x.b[3] < b[1] - 0.5) continue;
+        if (faceFxDist(f, x.b) <= 0.5) { counts.unknown--; counts.room++; map[f.i] = 'room'; why[f.i] = ['器具']; break; }
       }
     }
   }
