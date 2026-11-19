@@ -205,3 +205,81 @@ test('文脈で変えるのは「類似：椅子」だけ（確定済み・他�
   const chair = { verdict: 'near', category: '椅子', score: 0.99, short: 545, long: 571 };
   assert.equal(promoteChair(chair, wetCtx), chair);
 });
+
+/* ===== 文脈判定の一般化（sw.36）: 衛生トップの椅子と、トイレ内の衛生器具 =====
+ * 実図面の食堂・待合の椅子と同じ特徴（453×519・円弧1）: 形では洗面器が1位、椅子が2位 */
+const basinChairCand = (x, y) => ({ b: [x, y, x + 0.453, y + 0.519], short: 453, long: 519, arcShare: 1, closed: true, dividers: 0 });
+/* 実図面の小便器の列と同じ特徴（407×500・円弧0.38）: 形では小便器と洋式大便器が僅差 */
+const urinalCand = (x, y) => ({ b: [x, y, x + 0.407, y + 0.5], short: 407, long: 500, arcShare: 0.38, closed: true, dividers: 52 });
+
+test('classifySymbol は次点と椅子の形スコアも返す（判定そのものは不変）', () => {
+  const r = classifySymbol({ short: 453, long: 519, arcShare: 1, closed: true, innerClosed: null, dividers: 0 });
+  assert.equal(r.result, '要確認');
+  assert.equal(r.category, '洗面器');
+  assert.equal(r.second, '椅子');
+  assert.ok(r.chairScore >= 0.95, `chairScore=${r.chairScore}`);
+});
+
+test('洗面器トップの候補も、文脈なしでは従来と同じ「類似：洗面器」', () => {
+  const f = basinChairCand(0, 0);
+  const a = classifyCluster(f, []);
+  assert.equal(a.verdict, 'near');
+  assert.equal(a.category, '洗面器');
+  assert.deepEqual(classifyCluster(f, [], null), a);
+});
+
+test('洗面器トップでも、列をなしていれば椅子で確定になる（食堂・待合の椅子）', () => {
+  const clusters = [basinChairCand(0, 0), basinChairCand(0.8, 0), basinChairCand(1.6, 0)];
+  const r = ctxFor(clusters);
+  assert.ok(r.every(x => x.verdict === 'hit' && x.category === '椅子' && x.context === 'chair'));
+});
+
+test('洗面器トップでも、確定した机のそばなら椅子で確定になる', () => {
+  const clusters = [basinChairCand(0, 0), deskCand(0, 0.57)]; /* 机の縁まで 0.05m */
+  const r = ctxFor(clusters);
+  assert.equal(r[0].verdict, 'hit');
+  assert.equal(r[0].category, '椅子');
+  assert.equal(r[0].context, 'chair');
+});
+
+test('洗面器トップの候補も、水回りの文字が近ければ椅子に上げない', () => {
+  const clusters = [basinChairCand(0, 0), basinChairCand(0.8, 0), basinChairCand(1.6, 0)];
+  const r = ctxFor(clusters, { texts: [{ t: '便', x: 1.0, y: 1.6 }] }); /* 列の中心から約1.3m */
+  assert.ok(r.every(x => x.verdict === 'near' && x.category === '洗面器'));
+});
+
+test('小便器の列は、便器の器具が端にあれば列全体が小便器で確定になる', () => {
+  const clusters = [urinalCand(0, 0), urinalCand(1.01, 0), urinalCand(2.02, 0)];
+  const fixtures = [{ b: [3.2, 0, 3.6, 0.45], t: 'toilet' }]; /* 3件目の縁まで約0.77m */
+  const r = ctxFor(clusters, { fixtures });
+  assert.ok(r.every(x => x.verdict === 'hit' && x.category === '小便器' && x.context === 'sanitary'));
+});
+
+test('小便器の列だけでは（アンカーが無ければ）確定しない', () => {
+  const clusters = [urinalCand(0, 0), urinalCand(1.01, 0), urinalCand(2.02, 0)];
+  const r = ctxFor(clusters);
+  assert.ok(r.every(x => x.verdict === 'near' && x.category === '小便器'));
+});
+
+test('衛生ルートは文脈オブジェクトのアンカーでだけ効く', () => {
+  const uri = { verdict: 'near', category: '小便器', score: 0.977, chairScore: 0.935, short: 407, long: 500 };
+  assert.equal(promoteChair(uri, { desk: false, rep: true, office: false, wet: false }), uri);
+  const up = promoteChair(uri, { desk: false, rep: false, office: false, wet: false, anchor: true });
+  assert.equal(up.verdict, 'hit');
+  assert.equal(up.category, '小便器');
+  assert.equal(up.context, 'sanitary');
+  const upG = promoteChair(uri, { desk: false, rep: false, office: false, wet: false, anchorGroup: true });
+  assert.equal(upG.verdict, 'hit');
+});
+
+test('ゾーン名の水回り降格は、大きな区画（複数室の混ざり）では効かない', () => {
+  const clusters = [chairCand(0, 0), deskCand(0, 0.62)];
+  const bigFaces = [{ i: 0, poly: [[-5, -5], [5, -5], [5, 5], [-5, 5]] }]; /* 100㎡ */
+  const zones = [{ name: '男子トイレ', faces: [0] }];
+  const rBig = ctxFor(clusters, { faces: bigFaces, zones });
+  assert.equal(rBig[0].verdict, 'hit');
+  assert.equal(rBig[0].category, '椅子');
+  const smallFaces = [{ i: 0, poly: [[-0.5, -0.5], [1.5, -0.5], [1.5, 1.5], [-0.5, 1.5]] }]; /* 4㎡ */
+  const rSmall = ctxFor(clusters, { faces: smallFaces, zones });
+  assert.equal(rSmall[0].verdict, 'near');
+});
