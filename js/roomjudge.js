@@ -24,7 +24,12 @@
  * 3段目・4段目の直接の根拠は、2段目で「ゾーンの同居」だけを理由に保留になった区画にも
  * 効かせる（根拠の強さは ゾーンの同居 < 名前・器具の近さ、の順。ゾーンの保留は仮の
  * 判断なので、後から見つかった直接の根拠が優先する）。ただし解析の印で保留になった
- * 区画（輪・帯など）は、直接の根拠でも動かさない。 */
+ * 区画（輪・帯など）は、直接の根拠でも動かさない。
+ * 最後に、仕上げ表のラベル列の細帯だけを格下げするガードを掛ける（5段目）：短辺0.40m
+ * 以下で、その短辺寸法を同じ帯で共有する区画が4件以上あり、器具もドアも中に入って
+ * いない区画は、部屋名の文字が中にあるだけで「名前」の根拠が付いても部屋と決めない
+ * （実測：5図面の部屋判定382件で、この型に当てはまる本物の部屋はゼロ）。根拠が
+ * 「名前」だけの room に限って unknown に戻し、理由は why に「ラベル帯」と残す。 */
 
 import { classify, joinTexts } from './reader2/text.js';
 
@@ -224,6 +229,44 @@ export function judgeRooms(faces = [], { marks = {}, names = {}, fixtures = [], 
         if (x.b[0] > b[2] + 0.5 || x.b[2] < b[0] - 0.5 || x.b[1] > b[3] + 0.5 || x.b[3] < b[1] - 0.5) continue;
         if (faceFxDist(f, x.b) <= 0.5) { decide(f, '器具'); break; }
       }
+    }
+  }
+
+  /* 5段目：ラベル帯ガード（格下げのみ・最後に掛ける）。仕上げ表のラベル列のマスには
+   * 部屋名の文字が並んでいるので、1段目の「名前」の根拠だけで部屋になってしまう。
+   * 実測で、ラベル列の細帯には本物の部屋と重ならない型があった（5図面の部屋判定
+   * 382件で誤爆ゼロ）：
+   *   ・短辺が 0.40m 以下
+   *   ・その短辺寸法を同じ帯で共有する区画が、自分を含めて4件以上。帯は、横長の
+   *     区画なら行（y区間の重なりが小さい方の高さの50%超）で高さが、縦長なら列
+   *     （x区間の重なり）で幅が、相対2%以内（下限5mm）で一致する区画の集まり
+   *   ・器具が中に入っていない（中心で判定）／ドアが中に入っていない（中心点で判定）
+   * 便器ブースは短辺0.84mで型の外、本物の床の細い断片は帯で繰り返さない（共有1件）
+   * ので、どちらも当たらない。対象は根拠が「名前」だけの room に限り、unknown に
+   * 戻して why に「ラベル帯」と残す。器具・ドア・ゾーンの根拠がある区画と、
+   * hold・out の区画には触らない。帯の数え方は図面の全区画（補足区画も含む）が対象 */
+  {
+    const close = (a, b) => Math.abs(a - b) <= Math.max(0.02 * Math.max(a, b), 0.005);
+    const ovR = (a0, a1, b0, b1) => { const ov = Math.min(a1, b1) - Math.max(a0, b0); const m = Math.min(a1 - a0, b1 - b0); return m > 0 ? ov / m : 0; };
+    const fxPts = (fixtures || []).filter(x => x && x.b).map(x => [(x.b[0] + x.b[2]) / 2, (x.b[1] + x.b[3]) / 2]);
+    const drPts = (doors || []).filter(d => d && d.c).map(d => d.c);
+    for (const f of F) {
+      if (map[f.i] !== 'room') continue;
+      const w = why[f.i];
+      if (!Array.isArray(w) || w.length !== 1 || w[0] !== '名前') continue;
+      const b = bbox.get(f.i);
+      const W = b[2] - b[0], H = b[3] - b[1];
+      if (Math.min(W, H) > 0.40) continue;
+      let band = 0;
+      for (const g of F) {
+        const gb = bbox.get(g.i);
+        if (H <= W ? (ovR(b[1], b[3], gb[1], gb[3]) > 0.5 && close(H, gb[3] - gb[1]))
+                   : (ovR(b[0], b[2], gb[0], gb[2]) > 0.5 && close(W, gb[2] - gb[0]))) band++;
+      }
+      if (band < 4) continue;
+      if (fxPts.some(p => pip(p[0], p[1], f.poly))) continue;
+      if (drPts.some(p => pip(p[0], p[1], f.poly))) continue;
+      map[f.i] = 'unknown'; counts.room--; counts.unknown++; why[f.i] = ['ラベル帯'];
     }
   }
   return { map, counts, why };
