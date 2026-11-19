@@ -12,6 +12,7 @@ import { readWithFixtures, oldFaceLights, roomOpenRuns, FIX_NAMES, FIX_ITEMS, FI
 import { planView, roomColor } from './planview.js';
 import { classifyBox, classifyCluster, buildChairContexts, SYM_VERDICTS, SYM_DICT } from './symdict.js';
 import { detectFurniture } from './furndetect.js';
+import { rescueFixtures, mergeFixtures } from './fixrescue.js';
 import { judgeRooms, ROOM_JUDGE } from './roomjudge.js';
 import { computeZones, splitFacesByLine } from './zones.js';
 import { extractDxfDims, checkDimensions, dimCheckFor } from './dxf-dims.js';
@@ -1377,14 +1378,23 @@ function stepRooms(ctx) {
         if (dims.length) { try { dimCheck = checkDimensions(dims); } catch (e2) { console.warn('寸法の答え合わせに失敗', e2); } }
         p.rooms.forEach(r => { if (r.src === 'plan') { r.src = 'plan-old'; delete r.faces; } });
         p.drawing = { fileName: (cad ? [cad] : files).map(f => f.name).join('、'), at: Date.now(), plan: res.plan, fixtures: cad ? res.fixtures : null, open: cad ? res.open : null, doors: cad ? (res.doorList || []) : [], fixG: cad ? res.fixG : '', fixGd: cad ? res.fixGd : '', dims, dimCheck };
+        /* 器具の救済：壁も器具も同じレイヤーに描く図面では、読み取りが壁のレイヤーごと外して器具が消える。
+         * 読み取りには触らず、ここでだけ救済分（src:'rescue'）を足す。読み取りが拾った器具と重なる物は出さない（そちらが優先） */
+        let allFixtures = res.fixtures || [];
+        if (cad && res.rescue && res.rescue.ents && res.rescue.ents.length) {
+          try {
+            const rescued = rescueFixtures(res.rescue.ents, res.plan, res.rescue.rot || 0, res.fixtures || [], res.rescue.roles || {});
+            if (rescued.length) { allFixtures = mergeFixtures(res.fixtures || [], rescued); p.drawing.fixtures = allFixtures; }
+          } catch (e2) { console.warn('器具の救済に失敗', e2); }
+        }
         /* 机・椅子などの家具：線の集まりから形の候補を切り出して覚える（判定はシンボル辞書。器具・見積の数字は変えない） */
-        if (cad) { try { p.drawing.furn = detectFurniture(res.plan.segs || [], res.fixtures || [], res.doorList || []); } catch (e2) { console.warn('家具の検出に失敗', e2); p.drawing.furn = []; } }
+        if (cad) { try { p.drawing.furn = detectFurniture(res.plan.segs || [], allFixtures, res.doorList || []); } catch (e2) { console.warn('家具の検出に失敗', e2); p.drawing.furn = []; } }
         /* 新しい読み取り（js/reader2）：図枠・表の印を作って覚えておく。今の読み取りの結果（区画・器具）は変えない。画面に出すのは「新しい読み取り」を選んだ時だけ */
         /* 解析を後で作り直せるように、文字・長い線・ドアを覚えておく（解析の作りを直した時、開いただけで新しい解析になる） */
         if (cad) p.drawing.src2 = { texts: res.texts || [], segs: res.longSegs && res.longSegs.length ? res.longSegs : [], doors: res.doorList || [] };
-        if (cad) { try { p.drawing.analysis = analyzeFrame({ segs: res.longSegs && res.longSegs.length ? res.longSegs : res.plan.segs, faces: res.plan.faces, texts: res.texts || [], fixtures: res.fixtures || [], doors: res.doorList || [] }); } catch (e2) { console.warn('新しい読み取りの解析に失敗', e2); } }
+        if (cad) { try { p.drawing.analysis = analyzeFrame({ segs: res.longSegs && res.longSegs.length ? res.longSegs : res.plan.segs, faces: res.plan.faces, texts: res.texts || [], fixtures: allFixtures, doors: res.doorList || [] }); } catch (e2) { console.warn('新しい読み取りの解析に失敗', e2); } }
         /* ゾーン分けは解析の後（表・表題欄・図枠と確定した区画を候補に入れないため、印を渡す） */
-        if (cad) { try { p.drawing.zones = computeZones({ segs: res.plan.segs || [], faces: res.plan.faces || [], texts: res.texts || [], doors: res.doorList || [], marks: (p.drawing.analysis && p.drawing.analysis.marks) || null, fixtures: res.fixtures || [] }).map(z => ({ id: uid('z'), fixed: false, ...z })); } catch (e2) { console.warn('ゾーン分けに失敗', e2); p.drawing.zones = []; } }
+        if (cad) { try { p.drawing.zones = computeZones({ segs: res.plan.segs || [], faces: res.plan.faces || [], texts: res.texts || [], doors: res.doorList || [], marks: (p.drawing.analysis && p.drawing.analysis.marks) || null, fixtures: allFixtures }).map(z => ({ id: uid('z'), fixed: false, ...z })); } catch (e2) { console.warn('ゾーン分けに失敗', e2); p.drawing.zones = []; } }
         if (cad && res.v2) { try { const P2 = { faces: res.v2.faces }; orderFacesOf(P2);
           /* 扉の無い開口は「区画の辺に壁の線が無い所」で決めるので、区画の形が壁の線に沿っていないと、辺のほとんどが開口になる。
            * 開口が周りの3割以上になる区画は、形が合っていないと見て、扉の無い開口を引かない（分からない物を引かない。ドアは残す） */
@@ -1405,9 +1415,9 @@ function stepRooms(ctx) {
             ['area', 'peri', 'poly', 'cx', 'cy', 'ch', 'name'].forEach(k => { if (f1[k] !== undefined) f2[k] = f1[k]; });
             if (f2.xc !== undefined) delete f2.xc;
             const k2 = String(f2.i), r1 = O1[String(f1.i)]; if (r1 && r1.length) op2[k2] = r1; else delete op2[k2]; });
-          p.drawing.v2 = { faces: P2.faces, open: op2, openDrop: drop, same, roles: res.roles || {}, single: res.single || 0, analysis: analyzeFrame({ segs: res.longSegs && res.longSegs.length ? res.longSegs : res.plan.segs, faces: P2.faces, texts: res.texts || [], fixtures: res.fixtures || [], doors: res.doorList || [], shapes: true }) }; } catch (e2) { console.warn('探し直した区画の解析に失敗', e2); } }
+          p.drawing.v2 = { faces: P2.faces, open: op2, openDrop: drop, same, roles: res.roles || {}, single: res.single || 0, analysis: analyzeFrame({ segs: res.longSegs && res.longSegs.length ? res.longSegs : res.plan.segs, faces: P2.faces, texts: res.texts || [], fixtures: allFixtures, doors: res.doorList || [], shapes: true }) }; } catch (e2) { console.warn('探し直した区画の解析に失敗', e2); } }
         sel.clear(); touch(p); draw();
-        toast(`区画を ${res.plan.faces.length} 個${cad ? `、器具を ${res.fixtures.filter(x => x.t !== 'other').length} 個` : ''}見つけました`);
+        toast(`区画を ${res.plan.faces.length} 個${cad ? `、器具を ${allFixtures.filter(x => x.t !== 'other').length} 個` : ''}見つけました`);
       } catch (err) {
         if (st) st.textContent = '読み込めませんでした：' + err.message;
         toast('図面を読み込めませんでした：' + err.message, { bad: true });

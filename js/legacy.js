@@ -79,6 +79,56 @@ export async function readWithFixtures(file, opt = {}) {
       const E = W.document.getElementById('engineFrame').contentWindow;
       out.longSegs = JSON.parse(E.eval(`(()=>{const M=rgM(),o=[];RG.segs.forEach(s=>{const a=KAKU_rerot([s[1]*M,s[2]*M],M),b=KAKU_rerot([s[3]*M,s[4]*M],M),dx=Math.abs(b[0]-a[0]),dy=Math.abs(b[1]-a[1]);if(Math.max(dx,dy)<1||Math.min(dx,dy)>0.01)return;o.push([a[0],a[1],b[0],b[1]].map(v=>Math.round(v*1000)/1000))});return JSON.stringify(o.slice(0,60000))})()`));
     } catch (e) { out.longSegs = []; }
+    /* 器具の救済の材料：壁のレイヤー（長い直線が長さの6割以上）なのに扉の円弧もあるレイヤーは、壁も器具も同じレイヤーに描く図面の物。
+     * 読み取り（KF_build）は壁のレイヤーを丸ごと外すので、そのレイヤーの器具が消えてしまう。ここでは材料（そのレイヤーの図形と
+     * レイヤーの役割）だけをもらって、器具の判定はアプリ側（js/fixrescue.js）に任せる。取れなくても読み込みは続ける */
+    out.rescue = null;
+    try {
+      await step('器具の取りこぼしが無いか調べています');
+      G(`window.__kxRescue='__pending';(async()=>{try{
+        const inp=document.getElementById('file'),file=inp&&inp.files&&inp.files[0];
+        if(!file){window.__kxRescue='null';return}
+        const nm=(file.name||'').toLowerCase();let R=null;
+        if(/\\.dxf$/.test(nm)){const buf=await file.arrayBuffer();let str;try{str=new TextDecoder('utf-8',{fatal:true}).decode(buf)}catch(e){str=new TextDecoder('shift_jis').decode(buf)}R=KE_parseDXF(str)}
+        else{const buf=await file.arrayBuffer();R=await KE_parseJWW(buf,{blocks:true})}
+        if(!R||!R.ents||!R.ents.length){window.__kxRescue='null';return}
+        KE_scaleUnits(R);const fac=1/1000;let rot=0;try{rot=(KAKU_fix&&KAKU_fix.rot)||0}catch(e){}
+        if(!rot){try{rot=KF_angle(KAKU_plan)||0}catch(e){}}
+        if(rot){const T=p=>{const q=KF_L([p[0]/1000,p[1]/1000],rot);return[q[0]*1000,q[1]*1000]};R.ents.forEach(e=>{['a','b','c','p'].forEach(k=>{if(e[k]&&e[k].length===2)e[k]=T(e[k])});if(e.pts)e.pts=e.pts.map(T);if(e.ell)e.ell=e.ell.map(T)})}
+        let roles={};try{const c=KE_classify(R.ents,R.ltab||{});Object.keys(c).forEach(k=>roles[k]=c[k].role)}catch(e){}
+        const P=KF_P();let X0=Infinity,Y0=Infinity,X1=-Infinity,Y1=-Infinity;
+        P.segs.forEach(s=>{X0=Math.min(X0,s[0],s[2]);X1=Math.max(X1,s[0],s[2]);Y0=Math.min(Y0,s[1],s[3]);Y1=Math.max(Y1,s[1],s[3])});
+        X0-=.3;Y0-=.3;X1+=.3;Y1+=.3;
+        const L=[],st={},doorLy=new Set();
+        R.ents.forEach(e=>{if(e.k==='text'||e.k==='insert'||e.k==='solid')return;let pts=null,cv=0;
+          if(e.k==='line')pts=[e.a,e.b];
+          else if(e.k==='poly')pts=e.closed&&e.pts.length>2?[...e.pts,e.pts[0]]:e.pts;
+          else if(e.k==='arc'){pts=e.pts||[];if(e.r*fac>=.45&&e.r*fac<=1.25&&Math.abs(Math.abs(e.sweep||0)-90)<25&&!KF_SKIP.test(e.ly||''))doorLy.add(e.ly||'')}
+          else if(e.k==='circle'&&e.ell)pts=e.ell;
+          else if(e.k==='circle'){const cc=e.c,r=e.r*fac;if(!(r>0))return;const nn=r<.05?8:16;pts=Array.from({length:nn+1},(_,k)=>[cc[0]+e.r*Math.cos(k*2*Math.PI/nn),cc[1]+e.r*Math.sin(k*2*Math.PI/nn)])}
+          if(!pts||pts.length<2)return;
+          const m=pts.map(p=>[p[0]*fac,p[1]*fac]);
+          if(e.k==='line'){if(KF_bent(m))cv=1}else if(e.k==='poly'){if(e.bul||KF_bent(m)>=4)cv=1}else cv=1;
+          let b=[Infinity,Infinity,-Infinity,-Infinity];m.forEach(p=>{b=[Math.min(b[0],p[0]),Math.min(b[1],p[1]),Math.max(b[2],p[0]),Math.max(b[3],p[1])]});
+          if(b[0]<X0||b[2]>X1||b[1]<Y0||b[3]>Y1)return;
+          const s=st[e.ly||'']||(st[e.ly||'']={t:0,l:0,n:0});
+          for(let k=1;k<m.length;k++){const d=Math.hypot(m[k][0]-m[k-1][0],m[k][1]-m[k-1][1]);s.t+=d;if(d>=1.2&&!cv){s.l+=d;s.n++}}
+          L.push(e)});
+        const FURN=/家具|什器|備品|データ|デスク|FURN|DATA/i;
+        const cand=new Set(Object.keys(st).filter(ly=>{const s=st[ly];return s.n>=6&&s.t>0&&s.l/s.t>=.6&&doorLy.has(ly)&&!KF_SKIP.test(ly)&&!FURN.test(ly)}));
+        if(!cand.size){window.__kxRescue='null';return}
+        const q=v=>v;
+        const ents=L.filter(e=>cand.has(e.ly||'')).map(e=>{const o={k:e.k,ly:e.ly||''};
+          if(e.k==='line'){o.a=e.a.map(q);o.b=e.b.map(q)}
+          else if(e.k==='poly'){o.pts=e.pts.map(p=>p.map(q));o.closed=!!e.closed;if(e.bul)o.bul=true}
+          else if(e.k==='arc'){o.pts=(e.pts||[]).map(p=>p.map(q));if(e.c)o.c=e.c.map(q);o.r=e.r;o.sweep=e.sweep}
+          else if(e.k==='circle'){if(e.c)o.c=e.c.map(q);o.r=e.r;if(e.ell)o.ell=e.ell.map(p=>p.map(q))}
+          return o});
+        window.__kxRescue=JSON.stringify({ents,roles,rot});
+      }catch(e){window.__kxRescue='null'}})()`);
+      const rj = await wait(() => { const v = G('window.__kxRescue'); return (typeof v === 'string' && v !== '__pending') ? v : null; }, 90000);
+      if (rj && rj !== 'null') { try { out.rescue = JSON.parse(rj); } catch (e) { out.rescue = null; } }
+    } catch (e) { console.warn('器具の救済の材料を取れませんでした', e); out.rescue = null; }
     /* 新しい読み取り・段階3：線のまとまりの「使う・使わない」を選び直して、同じ区画探しをもう一度回す。
      * opt.regroup(out, raw) が「使わないにするまとまりの番号」を返した時だけ回す。回した後は元の選び方に戻して探し直すので、今の読み取りの結果は変わらない。
      * 開口（ドア・扉の無い開口）は、前のKAKUの調べ方に、探し直した区画を一時的に渡して出す */
