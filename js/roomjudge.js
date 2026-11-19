@@ -10,18 +10,25 @@
  * 直接の根拠で決まらなかった区画（unknown）だけは、属するゾーンの根拠で補う（2段目）：
  * 部屋名のゾーンに入っていれば room、仕上げ・天井高の注記だけが名前のゾーンは hold まで、
  * 名前の無いゾーンでも直接 room と判定された区画と同居していれば hold。
- * 印（out/hold）と直接の根拠は、ゾーンの根拠では絶対に上書きしない。 */
+ * 印（out/hold）と直接の根拠は、ゾーンの根拠では絶対に上書きしない。
+ * 名前の文字そのものも根拠にする（texts を渡した時）：バラバラ文字をつないだ部屋名が
+ * 区画の中にあれば、その区画（を含む一番小さい区画）の「名前」の根拠になる。どの区画にも
+ * 入らなかった部屋名は、0.5m 以内の縁にある区画の根拠にする（3段目。名前はその部屋の床に
+ * 書かれるもので、0.5m を超えると隣の空間との境が曖昧になるため、そこで止める）。
+ * 会社名のスタンプ（「一級建築士」「建築士事務所」を含む名前）は部屋名として扱わない。 */
 
-import { classify } from './reader2/text.js';
+import { classify, joinTexts } from './reader2/text.js';
 
 /* ゾーン名の種別（zones.js の種の付け方と同じ）：room＝部屋名として分類できる名前、
  * note＝仕上げ・天井高の注記、named＝名前はあるがどちらとも言えないもの、none＝名前なし */
 const NOTE_RE = /^(壁|床|天井|巾木)\s*[:：]|^CH\s*[=＝:：]/i;
 const SKIP_NAMES = new Set(['事務所棟']);
+const STAMP_RE = /一級建築士|建築士事務所/;
 export function zoneNameKind(name) {
   const n = String(name || '');
   if (!n) return 'none';
   if (NOTE_RE.test(n) || classify(n) === 'ch') return 'note';
+  if (STAMP_RE.test(n)) return 'named';
   if (classify(n) === 'room' && !SKIP_NAMES.has(n)) return 'room';
   return 'named';
 }
@@ -36,9 +43,10 @@ export const ROOM_JUDGE = {
 const pip = (x, y, P) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const a = P[i], b = P[j]; if ((a[1] > y) !== (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]) c = !c; } return c; };
 
 /* faces: [{i, name, area, poly}]、marks/names は解析の印と名前の提案（区画の i がキー）、
- * fixtures: [{b}]、doors: [{c, m}]、zones: [{name, faces:[区画の i]}]（任意・2段目の根拠）。
+ * fixtures: [{b}]、doors: [{c, m}]、zones: [{name, faces:[区画の i]}]（任意・2段目の根拠）、
+ * texts: [{t|s, x, y}]（任意・名前の文字そのものの根拠。バラバラ文字は中でつなぐ）。
  * 戻り値 { map: {i: 'room'|'hold'|'out'|'unknown'}, counts, why: {i: ['名前','器具','ドア','ゾーン']} } */
-export function judgeRooms(faces = [], { marks = {}, names = {}, fixtures = [], doors = [], zones = [] } = {}) {
+export function judgeRooms(faces = [], { marks = {}, names = {}, fixtures = [], doors = [], zones = [], texts = [] } = {}) {
   const F = (faces || []).filter(f => f && f.poly && f.poly.length >= 3);
   const bbox = new Map();
   for (const f of F) {
@@ -47,8 +55,8 @@ export function judgeRooms(faces = [], { marks = {}, names = {}, fixtures = [], 
     bbox.set(f.i, [x0, y0, x1, y1]);
   }
   /* 点の根拠：その点を含む一番小さい区画へ */
-  const owner = new Map(); /* face i -> Set('器具'|'ドア') */
-  const give = (x, y, kind) => {
+  const owner = new Map(); /* face i -> Set('器具'|'ドア'|'名前') */
+  const smallestAt = (x, y) => {
     let best = null;
     for (const f of F) {
       const b = bbox.get(f.i);
@@ -56,6 +64,10 @@ export function judgeRooms(faces = [], { marks = {}, names = {}, fixtures = [], 
       if (!pip(x, y, f.poly)) continue;
       if (!best || (f.area || Infinity) < (best.area || Infinity)) best = f;
     }
+    return best;
+  };
+  const give = (x, y, kind) => {
+    const best = smallestAt(x, y);
     if (!best) return;
     let s = owner.get(best.i); if (!s) { s = new Set(); owner.set(best.i, s); }
     s.add(kind);
@@ -63,14 +75,28 @@ export function judgeRooms(faces = [], { marks = {}, names = {}, fixtures = [], 
   (fixtures || []).forEach(x => { if (x && x.b) give((x.b[0] + x.b[2]) / 2, (x.b[1] + x.b[3]) / 2, '器具'); });
   (doors || []).forEach(dr => { if (!dr) return; if (dr.c) give(dr.c[0], dr.c[1], 'ドア'); if (dr.m) give(dr.m[0], dr.m[1], 'ドア'); });
 
+  /* 部屋名の文字（バラバラ文字はつないでから、部屋名として分類できるものだけ）。
+   * 中にある区画への根拠は器具・ドアと同じく一番小さい区画へ（owner の '名前'）。
+   * どの区画にも入らなかった文字は、3段目（名前の近く）で使うために残す */
+  const roomTexts = []; /* {t, x, y, owner: 区画の i | null} */
+  if (texts && texts.length) {
+    const joined = joinTexts(texts.map(t => t && { t: t.t != null ? t.t : t.s, x: +t.x, y: +t.y }).filter(Boolean)).texts;
+    for (const t of joined) {
+      if (classify(t.t) !== 'room' || SKIP_NAMES.has(t.t) || STAMP_RE.test(t.t)) continue;
+      const best = smallestAt(t.x, t.y);
+      roomTexts.push({ t: t.t, x: t.x, y: t.y, owner: best ? best.i : null });
+      if (best) { let s = owner.get(best.i); if (!s) { s = new Set(); owner.set(best.i, s); } s.add('名前'); }
+    }
+  }
+
   const map = {}, why = {}, counts = { room: 0, hold: 0, out: 0, unknown: 0, total: F.length };
   for (const f of F) {
     const m = marks[f.i] || marks[String(f.i)];
     if (m && m.s === 'out') { map[f.i] = 'out'; counts.out++; continue; }
     if (m && m.s === 'hold') { map[f.i] = 'hold'; counts.hold++; continue; }
     const w = [];
-    if (f.name || names[f.i] || names[String(f.i)]) w.push('名前');
     const s = owner.get(f.i);
+    if (f.name || names[f.i] || names[String(f.i)] || (s && s.has('名前'))) w.push('名前');
     if (s) { if (s.has('器具')) w.push('器具'); if (s.has('ドア')) w.push('ドア'); }
     if (w.length) { map[f.i] = 'room'; counts.room++; why[f.i] = w; }
     else { map[f.i] = 'unknown'; counts.unknown++; }
@@ -98,6 +124,31 @@ export function judgeRooms(faces = [], { marks = {}, names = {}, fixtures = [], 
       else if (zi.hasRoom) next = zi.kind === 'named' ? 'room' : 'hold';
       else if (zi.kind === 'note') next = 'hold';
       if (next) { counts.unknown--; counts[next]++; map[f.i] = next; why[f.i] = ['ゾーン']; }
+    }
+  }
+
+  /* 3段目：名前の近く。部屋名の文字が区画の外にあって、その縁から 0.5m 以内に
+   * ある区画は、その名前の部屋の床の断片とみる（ゾーン分けで取り付けられなかった
+   * 小さい断片や、名前の文字が隣の区画に入っている場合）。文字が区画の中にある
+   * 場合は1段目（一番小さい区画への付与）の担当なので、ここでは見ない。
+   * 印と直接・ゾーンの根拠は今まで通り上書きしない */
+  if (roomTexts.length) {
+    const segDist = (px, py, a, b) => {
+      const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy;
+      let t = L2 ? ((px - a[0]) * dx + (py - a[1]) * dy) / L2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      return Math.hypot(px - (a[0] + t * dx), py - (a[1] + t * dy));
+    };
+    for (const f of F) {
+      if (map[f.i] !== 'unknown') continue;
+      const b = bbox.get(f.i);
+      for (const t of roomTexts) {
+        if (pip(t.x, t.y, f.poly)) continue;   /* 中にある名前は1段目（一番小さい区画）の担当 */
+        if (t.x < b[0] - 0.5 || t.x > b[2] + 0.5 || t.y < b[1] - 0.5 || t.y > b[3] + 0.5) continue;
+        let d = Infinity;
+        for (let k = 0; k < f.poly.length; k++) d = Math.min(d, segDist(t.x, t.y, f.poly[k], f.poly[(k + 1) % f.poly.length]));
+        if (d <= 0.5) { counts.unknown--; counts.room++; map[f.i] = 'room'; why[f.i] = ['名前']; break; }
+      }
     }
   }
   return { map, counts, why };

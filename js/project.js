@@ -451,10 +451,10 @@ function roomJudge(d) {
   const c = rjCache.get(d);
   /* ゾーンは名前の付け替え等でその場で書き換わるので、配列の同一性ではなく署名で比べる */
   const zsig = (d.zones || []).map(z => `${z.id || ''}|${z.name || ''}|${(z.faces || []).length}`).join(';');
-  if (c && c.faces === d.plan.faces && c.analysis === d.analysis && c.fixtures === d.fixtures && c.doors === d.doors && c.zsig === zsig) return c.r;
+  if (c && c.faces === d.plan.faces && c.analysis === d.analysis && c.fixtures === d.fixtures && c.doors === d.doors && c.src2 === d.src2 && c.zsig === zsig) return c.r;
   const A = d.analysis || {};
-  const r = judgeRooms(d.plan.faces, { marks: A.marks || {}, names: A.names || {}, fixtures: d.fixtures || [], doors: d.doors || [], zones: d.zones || [] });
-  rjCache.set(d, { faces: d.plan.faces, analysis: d.analysis, fixtures: d.fixtures, doors: d.doors, zsig, r });
+  const r = judgeRooms(d.plan.faces, { marks: A.marks || {}, names: A.names || {}, fixtures: d.fixtures || [], doors: d.doors || [], zones: d.zones || [], texts: (d.src2 && d.src2.texts) || [] });
+  rjCache.set(d, { faces: d.plan.faces, analysis: d.analysis, fixtures: d.fixtures, doors: d.doors, src2: d.src2, zsig, r });
   return r;
 }
 function roomJudgeEntries(d) {
