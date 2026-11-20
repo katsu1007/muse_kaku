@@ -6,9 +6,13 @@ import { classifySymbol, SYM_THRESHOLD } from '../js/symdict.js';
 
 test('しきい値は 0.90', () => { assert.equal(SYM_THRESHOLD, 0.90); });
 
-test('CC0小便器の実測特徴（450×500・円弧0.67）は小便器', () => {
+test('CC0小便器の実測特徴（450×500・円弧0.67）は、寸法が国内の実在帯の外なので確定せず「要確認：小便器」', () => {
+  // 形は小便器そのものだが、500の辺は小便器の寸法帯（幅330〜460・出寸法320〜420）を外れる。
+  // 2026-11-21 の寸法特性（Web参照基準）で、形のスコアが十分でも確定しないようになった
   const r = classifySymbol({ short: 450, long: 500, arcShare: 0.67, closed: true, innerClosed: false, dividers: null });
-  assert.equal(r.result, '小便器');
+  assert.equal(r.result, '要確認');
+  assert.equal(r.category, '小便器');
+  assert.equal(r.sizeVeto, 'urinal-size');
   assert.ok(r.score >= 0.9);
 });
 
@@ -209,8 +213,10 @@ test('文脈で変えるのは「類似：椅子」だけ（確定済み・他�
 /* ===== 文脈判定の一般化（sw.36）: 衛生トップの椅子と、トイレ内の衛生器具 =====
  * 実図面の食堂・待合の椅子と同じ特徴（453×519・円弧1）: 形では洗面器が1位、椅子が2位 */
 const basinChairCand = (x, y) => ({ b: [x, y, x + 0.453, y + 0.519], short: 453, long: 519, arcShare: 1, closed: true, dividers: 0 });
-/* 実図面の小便器の列と同じ特徴（407×500・円弧0.38）: 形では小便器と洋式大便器が僅差 */
-const urinalCand = (x, y) => ({ b: [x, y, x + 0.407, y + 0.5], short: 407, long: 500, arcShare: 0.38, closed: true, dividers: 52 });
+/* 実図面の小便器の列と同じ特徴（400×460・円弧0.38）: 形では小便器と洋式大便器が僅差。
+ * 寸法は小便器の実在帯（幅330〜460・出寸法320〜420）に収まる物を使う
+ * （旧 407×500 は、寸法照合で洗面器と判明した三井屋の実例に合わせていたため差し替え） */
+const urinalCand = (x, y) => ({ b: [x, y, x + 0.4, y + 0.46], short: 400, long: 460, arcShare: 0.38, closed: true, dividers: 52 });
 
 test('classifySymbol は次点と椅子の形スコアも返す（判定そのものは不変）', () => {
   const r = classifySymbol({ short: 453, long: 519, arcShare: 1, closed: true, innerClosed: null, dividers: 0 });
@@ -262,7 +268,7 @@ test('小便器の列だけでは（アンカーが無ければ）確定しな�
 });
 
 test('衛生ルートは文脈オブジェクトのアンカーでだけ効く', () => {
-  const uri = { verdict: 'near', category: '小便器', score: 0.977, chairScore: 0.935, short: 407, long: 500 };
+  const uri = { verdict: 'near', category: '小便器', score: 0.977, chairScore: 0.935, short: 400, long: 460 };
   assert.equal(promoteChair(uri, { desk: false, rep: true, office: false, wet: false }), uri);
   const up = promoteChair(uri, { desk: false, rep: false, office: false, wet: false, anchor: true });
   assert.equal(up.verdict, 'hit');
@@ -270,6 +276,71 @@ test('衛生ルートは文脈オブジェクトのアンカーでだけ効く',
   assert.equal(up.context, 'sanitary');
   const upG = promoteChair(uri, { desk: false, rep: false, office: false, wet: false, anchorGroup: true });
   assert.equal(upG.verdict, 'hit');
+});
+
+/* ===== 寸法特性による確定の制限（2026-11-21、Web参照基準の実測から） ===== */
+import { sizeVetoReason } from '../js/symdict.js';
+
+test('寸法特性：便器は長さ820超・幅510超では確定しない（描画実測の上限から）', () => {
+  assert.equal(sizeVetoReason('洋式大便器', { short: 450, long: 830 }), 'toilet-size');
+  assert.equal(sizeVetoReason('洋式大便器', { short: 520, long: 700 }), 'toilet-size');
+  assert.equal(sizeVetoReason('洋式大便器', { short: 450, long: 800 }), null);
+  assert.equal(sizeVetoReason('洋式大便器', { short: 496, long: 785 }), null); /* リモコン付き実測の最大級 */
+});
+
+test('寸法特性：小便器は幅330〜460・出寸法320〜420の枠の外では確定しない', () => {
+  assert.equal(sizeVetoReason('小便器', { short: 316, long: 324 }), 'urinal-size'); /* コーナー手洗器の実例 */
+  assert.equal(sizeVetoReason('小便器', { short: 407, long: 500 }), 'urinal-size'); /* 洗面器と判明した三井屋の実例 */
+  assert.equal(sizeVetoReason('小便器', { short: 370, long: 420 }), null);
+  assert.equal(sizeVetoReason('小便器', { short: 420, long: 460 }), null);
+  const r = classifyBox([0, 0, 0.316, 0.324]);
+  assert.equal(r.verdict, 'near');
+  assert.equal(r.category, '小便器');
+  assert.equal(r.sizeVeto, 'urinal-size');
+});
+
+test('寸法特性：浴槽は幅680〜950・長さ850〜1750の外では確定しない', () => {
+  assert.equal(sizeVetoReason('浴槽', { short: 750, long: 1780 }), 'bath-size');
+  assert.equal(sizeVetoReason('浴槽', { short: 600, long: 1200 }), 'bath-size');
+  assert.equal(sizeVetoReason('浴槽', { short: 750, long: 1700 }), null);
+  assert.equal(sizeVetoReason('浴槽', { short: 720, long: 1050 }), null); /* 在来の小型浴槽帯 */
+  const r = classifySymbol({ short: 740, long: 1770, arcShare: 0.25, closed: true, innerClosed: true, dividers: null });
+  assert.equal(r.result, '要確認');
+  assert.equal(r.category, '浴槽');
+  assert.equal(r.sizeVeto, 'bath-size');
+});
+
+test('寸法特性：手洗器より広く洗面ボウルより浅い単体（344×569）は洗面器で確定しない', () => {
+  // 実図面で椅子の背もたれが器具として拾われた実例の寸法。奥行344は手洗器の帯、
+  // 幅569は手洗器の上限（500）超えで、カウンター幅（600）にも届かない
+  const r = classifyBox([0, 0, 0.344, 0.569]);
+  assert.equal(r.verdict, 'near');
+  assert.equal(r.category, '洗面器');
+  assert.equal(r.sizeVeto, 'basin-depth');
+});
+
+test('寸法特性：SKと洗面器が重なる帯（456×560）は寸法で確定しない', () => {
+  const r = classifySymbol({ short: 456, long: 560, arcShare: 0.6, closed: true, innerClosed: true, dividers: null });
+  assert.equal(r.result, '要確認');
+  assert.equal(r.category, '洗面器');
+  assert.equal(r.sizeVeto, 'sk-overlap');
+});
+
+test('寸法特性：sizeVeto の付いた類似は文脈（アンカー）でも確定に上げない', () => {
+  const clusters = [urinalCand(0, 0), urinalCand(1.01, 0), urinalCand(2.02, 0)];
+  const fixtures = [{ b: [3.2, 0, 3.6, 0.45], t: 'toilet' }];
+  const ok = ctxFor(clusters, { fixtures });
+  assert.ok(ok.every(x => x.verdict === 'hit')); /* 帯の中の列は従来どおり上がる */
+  const vetoed = { verdict: 'near', category: '小便器', score: 0.977, chairScore: 0.9, short: 407, long: 500, sizeVeto: 'urinal-size' };
+  assert.equal(promoteChair(vetoed, { desk: false, rep: false, office: false, wet: false, anchor: true }), vetoed);
+});
+
+test('消火栓：廊下壁際の浅い箱（250×800・直線のみ）はクラスタなら消火栓、寸法だけでは当てない', () => {
+  const r = classifyCluster({ short: 250, long: 800, arcShare: 0, closed: true, dividers: 0 }, []);
+  assert.equal(r.verdict, 'hit');
+  assert.equal(r.category, '消火栓');
+  /* 浅型カウンター洗面（600×250）と寸法が重なるため、外形だけの判定には使わない */
+  assert.equal(classifyBox([0, 0, 0.6, 0.25]).verdict, 'unknown');
 });
 
 test('ゾーン名の水回り降格は、大きな区画（複数室の混ざり）では効かない', () => {

@@ -3188,6 +3188,45 @@ export const SYM_DICT = [
     }
    }
   ]
+ },
+ {
+  "id": "hydrant",
+  "category": "消火栓",
+  "kind": "設備",
+  "patterns": [
+   {
+    "origin": "rule",
+    "label": "屋内消火栓箱（標準寸法）",
+    "size_range_mm": {
+     "short": [
+      200,
+      300
+     ],
+     "long": [
+      600,
+      1100
+     ]
+    },
+    "aspect_range": [
+     2,
+     5.5
+    ],
+    "primitives": {
+     "arc_share": [
+      0,
+      0.3
+     ],
+     "closed_outline": true,
+     "inner_closed": null,
+     "divider_min": null,
+     "straight_back": true
+    },
+    "needs_features": [
+     "arcShare"
+    ],
+    "notes": "国交省「公共建築設備工事標準図（機械設備工事編）」の機材標準寸法：HB-1 幅700〜800×奥行200〜300、HB-4 幅600〜900×奥行200〜250、消火器箱併設形 幅900〜1,100×奥行200〜300。廊下壁際の浅い箱で、部屋・収納と誤らないために置く（2026-11-21 Web参照基準から追加。寸法という事実のみで、幾何は取り込んでいない）。寸法だけでは浅型カウンター洗面（600×250級）と区別できないため、線の特徴がある候補（クラスタ）にだけ当てる（needs_features）"
+   }
+  ]
  }
 ];
 
@@ -3219,6 +3258,51 @@ export function scorePattern(p, f) {
   return 0.90 + 0.10 * (cs(f.short, sr.short) + cs(f.long, sr.long)) / 2;
 }
 
+/* ===== 寸法特性による確定の制限（2026-11-21、Web参照基準の実測から） =====
+ * パターンの形のスコアが十分でも、外形寸法がその器具の実在寸法帯から外れていれば
+ * 「形だけでは確定しない」として類似（要確認）に落とす。出典は
+ * ~/workspace/kaku/work/symbol-webref/REFERENCE.md（国交省標準図・メーカー公表寸法という
+ * 事実のみ）と、実図面シンボルの実測（TOILET_JWW.md：便器の平面幅はリモコン付きで496、
+ * 描画寸法は公称より10〜15mm短いので帯は描画実測基準）。
+ * 帯は short=短辺・long=長辺（mm）。どちらの辺が幅でどちらが奥行かは外形だけでは
+ * 分からないので、両方向の割り当てが両方とも成り立たない時だけ外す（保守側）。
+ * - 洋式大便器：描画の長さ上限は約800（実測最大785＋余裕）。幅はリモコン付き496が上限級。
+ *   長さ>820 または 幅>510 は便器として確定しない。
+ * - 小便器：幅330〜460・出寸法320〜420（LIXIL/TOTO公表寸法、Pass 2 で奥行上限420に拡張）。
+ *   両辺がこの枠に収まらない物は確定しない。
+ * - 浴槽：UB浴槽は幅800〜900・在来は700〜750、長さは小型在来の850からUB最大級の1,750まで。
+ *   幅680〜950・長さ850〜1,750 の外は確定しない。
+ * - 洗面器（単体ボウルの奥行条件）：単体ボウルは奥行380以上が洗面器、360以下は手洗器の帯。
+ *   ただし幅が手洗器の上限（500）を超えカウンター幅（600）に届かない中間の物は、
+ *   手洗器でも洗面ボウルでもカウンターでもあり得ないので確定しない（奥行≤360・幅520〜580）。
+ *   カウンター型（幅600級）は奥行が浅い物が実在する（実測600×250）ため、この条件の対象外。
+ * - SK重なり帯：SK（560×456級）と洗面器単体（500〜600×450〜550）は寸法が完全に重なる。
+ *   幅525〜600×奥行450〜460 では寸法を根拠に確定しない（洗面器・流し・SK の双方）。
+ * 戻り値: 落とす理由のキー文字列、または null（制限なし） */
+export function sizeVetoReason(category, f) {
+  const s = f && f.short, l = f && f.long;
+  if (!(s > 0) || !(l > 0)) return null;
+  switch (category) {
+    case '洋式大便器':
+      if (l > 820 || s > 510) return 'toilet-size';
+      return null;
+    case '小便器':
+      if (s < 320 || s > 420 || l < 330 || l > 460) return 'urinal-size';
+      return null;
+    case '浴槽':
+      if (s < 680 || s > 950 || l < 850 || l > 1750) return 'bath-size';
+      return null;
+    case '洗面器':
+      if (s <= 360 && l > 520 && l < 580) return 'basin-depth';
+      if (s >= 450 && s <= 460 && l >= 525 && l <= 600) return 'sk-overlap';
+      return null;
+    case '流し・SK':
+      if (s >= 450 && s <= 460 && l >= 525 && l <= 600) return 'sk-overlap';
+      return null;
+  }
+  return null;
+}
+
 /* 判定の3区分（画面の色分け用）：検出＝緑、類似＝橙、不明＝灰色 */
 export const SYM_VERDICTS = {
   hit: { key: "hit", name: "検出", color: "#3ccf8e" },
@@ -3243,7 +3327,7 @@ export function classifyBox(b, userDict = []) {
   }
   const r = classifySymbol({ short, long, arcShare: null, closed: null, innerClosed: null, dividers: null });
   if (r.result === "不明") return { verdict: "unknown", category: null, score: r.score, short, long, second: r.second, secondScore: r.secondScore, chairScore: r.chairScore };
-  if (r.result === "要確認") return { verdict: "near", category: r.category, score: r.score, short, long, second: r.second, secondScore: r.secondScore, chairScore: r.chairScore };
+  if (r.result === "要確認") return { verdict: "near", category: r.category, score: r.score, short, long, second: r.second, secondScore: r.secondScore, chairScore: r.chairScore, sizeVeto: r.sizeVeto };
   return { verdict: "hit", category: r.result, score: r.score, short, long, second: r.second, secondScore: r.secondScore, chairScore: r.chairScore };
 }
 
@@ -3264,7 +3348,7 @@ export function classifyCluster(f, userDict = [], ctx = null) {
   }
   const r = classifySymbol({ short, long, arcShare: f.arcShare != null ? f.arcShare : null, closed: f.closed != null ? f.closed : null, innerClosed: null, dividers: f.dividers != null ? f.dividers : null });
   if (r.result === "不明") return { verdict: "unknown", category: null, score: r.score, short, long, second: r.second, secondScore: r.secondScore, chairScore: r.chairScore };
-  if (r.result === "要確認") return promoteChair({ verdict: "near", category: r.category, score: r.score, short, long, second: r.second, secondScore: r.secondScore, chairScore: r.chairScore }, ctx);
+  if (r.result === "要確認") return promoteChair({ verdict: "near", category: r.category, score: r.score, short, long, second: r.second, secondScore: r.secondScore, chairScore: r.chairScore, sizeVeto: r.sizeVeto }, ctx);
   return { verdict: "hit", category: r.result, score: r.score, short, long, second: r.second, secondScore: r.secondScore, chairScore: r.chairScore };
 }
 
@@ -3322,7 +3406,8 @@ const chairScoreOf = r => (r && r.chairScore != null ? r.chairScore : (r && r.ca
  * 衛生ルート（context: "sanitary"）：1位が衛生器具のまま、アンカー（器具・文字への近さ）
  *   またはアンカーと同寸法で連なる列に属する時、その1位カテゴリで確定する。 */
 export function promoteChair(r, ctx) {
-  if (!ctx || !r || r.mine || r.verdict !== 'near') return r;
+  /* sizeVeto（寸法が実在帯の外）の類似は、文脈でも確定に上げない。寸法の不成立は文脈では覆らない */
+  if (!ctx || !r || r.mine || r.verdict !== 'near' || r.sizeVeto) return r;
   const support = !!(ctx.desk || ctx.rep || ctx.office);
   if (r.category === '椅子') {
     if (!(r.score >= CHAIR_CTX_FLOOR)) return r;
@@ -3439,6 +3524,10 @@ export function classifySymbol(f) {
     chairScore: byCat.has("椅子") ? byCat.get("椅子").score : 0
   };
   if (!hits.length || hits[0].score < SYM_THRESHOLD) return { result: "不明", score: hits.length ? hits[0].score : 0, category: null, label: null, ...extra };
+  /* 寸法特性の制限：形のスコアが十分でも、寸法が実在帯の外なら確定しない（類似に落とす）。
+   * sizeVeto が付いた類似は、文脈判定（promoteChair）でも確定に上げない */
+  const veto = sizeVetoReason(hits[0].category, f);
+  if (veto) return { result: "要確認", score: hits[0].score, category: hits[0].category, label: hits[0].label, sizeVeto: veto, ...extra };
   if (hits.length > 1 && hits[0].category !== hits[1].category && hits[0].score - hits[1].score < 0.05)
     return { result: "要確認", score: hits[0].score, category: hits[0].category, label: hits[0].label, ...extra };
   return { result: hits[0].category, score: hits[0].score, category: hits[0].category, label: hits[0].label, ...extra };
