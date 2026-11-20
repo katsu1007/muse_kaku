@@ -18,6 +18,7 @@ import { computeZones, splitFacesByLine, detectTableAreas } from './zones.js';
 import { supplementFaces } from './polygonize.js';
 import { extractDxfDims, checkDimensions, dimCheckFor } from './dxf-dims.js';
 import { estimateSymScale, symScaleFor } from './symscale.js';
+import { correctFixtureTypes } from './typefix.js';
 import { USES, DEF_LM, needCount, pitchFor, luxOf, wirePlan, cableQty, pip, polyD } from './lighting.js';
 /* iPhone・iPad では、選べるファイルの種類を絞ると .jww・.jwc・.dxf が灰色になって選べない（iPhone がこの拡張子を知らないため）。
    なので iPhone・iPad では絞らない。何を選んでも、読み込む時に拡張子で見分けるので困らない */
@@ -435,13 +436,43 @@ function symList(d) {
   symCache.set(d, { from: fx, fu, ver: symVer, zsig, faces, src2, ss, list });
   return list;
 }
+/* 器具のタイプ補正（js/typefix.js）：保存してある器具の種類は変えず、辞書の判定と
+ * 寸法の参照基準と図面の文脈で照合して「表示する種類」だけを決める。結果は器具の
+ * 並びと同じ順で返る（補正なしは null、{ shown, rule, reason, confirm }）。
+ * 利用者が種類を直した器具は補正しない（typefix 側でも edited を見ている） */
+const tfCache = new WeakMap();
+function typeFixMap(d) {
+  const fx = (d && d.fixtures) || [];
+  if (!fx.length) return [];
+  const S = symList(d);
+  const tsig = fx.map(x => `${x.t}:${x.edited ? 1 : 0}`).join(',');
+  const zsig = (d.zones || []).map(z => z.name || '').join(';');
+  const c = tfCache.get(d);
+  if (c && c.S === S && c.tsig === tsig && c.zsig === zsig) return c.map;
+  const byK = new Map(S.filter(s => !s.furn).map(s => [s.k, s]));
+  const verdicts = fx.map((x, k) => { const s = byK.get(k); return s ? { verdict: s.verdict, category: s.category, score: s.score, sizeVeto: s.sizeVeto || null } : null; });
+  const ss = symScaleFor(d);
+  const scale = (ss && ss.factor > 0) ? ss.factor : 1;
+  let map = fx.map(() => null);
+  try { map = correctFixtureTypes(fx, { verdicts, texts: (d.src2 && d.src2.texts) || [], zoneNames: (d.zones || []).map(z => z.name).filter(Boolean), scale }); }
+  catch (e) { console.warn('器具のタイプ補正に失敗', e); }
+  tfCache.set(d, { S, tsig, zsig, map });
+  return map;
+}
+/* 器具の「表示する種類」（補正があれば補正後、無ければ保存してある種類） */
+const shownFixType = (TF, x, k) => (TF[k] && TF[k].shown) || x.t;
+
 /* シンボルの判定の一覧：行を押すと図面のその場所へ飛ぶ */
 function symSummary(d, selK = -1) {
   const S = symList(d);
   if (!S.length) return '';
+  const TF = typeFixMap(d);
   const cnt = { hit: 0, near: 0, unknown: 0 }; S.forEach(s => cnt[s.verdict]++);
   const label = s => s.verdict === 'hit' ? s.category : s.verdict === 'near' ? `類似：${s.category || '不明'}` : '不明';
-  const rows = S.slice(0, 150).map(s => `<div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn sm" data-sym="${s.k}" style="justify-content:flex-start;gap:8px;min-height:40px;flex:1;text-align:left${s.k === selK ? ';border-color:var(--accent);background:rgba(255,138,61,.10)' : ''}"><span style="width:12px;height:12px;border-radius:3px;background:${SYM_VERDICTS[s.verdict].color};flex:none"></span><b>${esc(label(s))}</b><span class="muted">${Math.round(s.short)}×${Math.round(s.long)}mm</span>${s.furn ? '<span class="muted">（線から検出）</span>' : ''}${s.context ? '<span class="muted">（文脈で確定）</span>' : ''}${s.mine ? '<span class="muted">（自分の辞書）</span>' : s.t && FIX_NAMES[s.t] ? `<span class="muted">（今の判定：${esc(FIX_NAMES[s.t])}）</span>` : ''}</button><button class="btn sm" data-symreg="${s.k}" style="min-height:40px;flex:none">${s.mine ? '直す' : 'これは何？'}</button></div>`).join('');
+  const tfSpan = s => { if (s.furn) return ''; const tf = TF[s.k]; if (!tf) return '';
+    if (tf.shown) return `<span style="color:var(--warn)">（タイプ補正：${esc(FIX_NAMES[tf.shown] || tf.shown)}として表示。${esc(tf.reason)}）</span>`;
+    if (tf.confirm) return `<span style="color:var(--warn)">（要確認：${esc(tf.reason)}）</span>`; return ''; };
+  const rows = S.slice(0, 150).map(s => `<div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn sm" data-sym="${s.k}" style="justify-content:flex-start;gap:8px;min-height:40px;flex:1;text-align:left${s.k === selK ? ';border-color:var(--accent);background:rgba(255,138,61,.10)' : ''}"><span style="width:12px;height:12px;border-radius:3px;background:${SYM_VERDICTS[s.verdict].color};flex:none"></span><b>${esc(label(s))}</b><span class="muted">${Math.round(s.short)}×${Math.round(s.long)}mm</span>${s.furn ? '<span class="muted">（線から検出）</span>' : ''}${s.context ? '<span class="muted">（文脈で確定）</span>' : ''}${s.mine ? '<span class="muted">（自分の辞書）</span>' : s.t && FIX_NAMES[s.t] ? `<span class="muted">（今の判定：${esc(FIX_NAMES[s.t])}）</span>` : ''}${tfSpan(s)}</button><button class="btn sm" data-symreg="${s.k}" style="min-height:40px;flex:none">${s.mine ? '直す' : 'これは何？'}</button></div>`).join('');
   const mine = userSyms();
   const mineHtml = mine.length ? `<div style="margin-top:10px"><b class="small">自分の辞書（${mine.length}件）</b><div style="display:grid;gap:6px;margin-top:6px">${mine.map(u => `<div class="row" style="gap:6px"><span class="pill" style="border:1px solid ${SYM_VERDICTS.hit.color};color:${SYM_VERDICTS.hit.color}">${esc(u.name)}</span><span class="small muted">${u.short}×${u.long}mm</span><span class="spacer"></span><button class="btn sm" data-symedit="${u.id}">名前を直す</button><button class="btn sm ghost danger" data-symdel="${u.id}">消す</button></div>`).join('')}</div></div>` : '';
   return `${(d.dims && d.dims.length) ? '' : symScaleLine(d)}<div class="row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)"><b class="small">シンボルの判定（辞書）</b>
@@ -482,10 +513,13 @@ function roomSummary(d) {
 function fixSummary(d) {
   const fx = d.fixtures || [];
   if (!fx.length) return d.fixtures ? '<div class="small muted" style="margin-top:8px">器具は見つかりませんでした。</div>' : '';
-  const c = {}; fx.forEach(x => { c[x.t] = (c[x.t] || 0) + 1; });
+  const TF = typeFixMap(d);
+  const c = {}; let nCorr = 0, nMark = 0;
+  fx.forEach((x, k) => { const t = shownFixType(TF, x, k); c[t] = (c[t] || 0) + 1; const tf = TF[k]; if (tf) { if (tf.shown) nCorr++; else if (tf.confirm) nMark++; } });
+  const note = (nCorr || nMark) ? `<div class="small muted" style="flex-basis:100%">辞書と寸法の照合による${[nCorr ? `表示の補正 ${nCorr} 件` : '', nMark ? `要確認 ${nMark} 件` : ''].filter(Boolean).join('・')}があります（保存してある判定そのものは変えていません。理由は下のシンボル判定の一覧で見られます）</div>` : '';
   return `<div class="row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)"><b class="small">図面の器具</b>
     ${Object.entries(c).map(([t, n]) => `<span class="pill ${t === 'unknown' ? 'warn' : t === 'other' ? '' : 'info'}">${esc(FIX_NAMES[t] || t)} ${n}</span>`).join('')}
-    <span class="spacer"></span><button class="btn sm primary" data-act="fixLines">${icon('list')}器具を明細に入れる</button></div>`;
+    <span class="spacer"></span><button class="btn sm primary" data-act="fixLines">${icon('list')}器具を明細に入れる</button>${note}</div>`;
 }
 
 /* ゾーン分け（部屋の候補）：色はゾーンの並び順で決める */
@@ -583,7 +617,10 @@ function openZoneEditor(zone, onDone) {
 
 function fixLinesDialog(p, after) {
   const fx = (p.drawing && p.drawing.fixtures) || [];
-  const c = {}; fx.forEach(x => { c[x.t] = (c[x.t] || 0) + 1; });
+  /* 種類はタイプ補正後の表示で数える（保存してある判定は変えない。js/typefix.js） */
+  const TF = typeFixMap(p.drawing);
+  const c = {}; const corrIn = {}; let nCorr = 0;
+  fx.forEach((x, k) => { const t = shownFixType(TF, x, k); c[t] = (c[t] || 0) + 1; if (TF[k] && TF[k].shown) { corrIn[t] = (corrIn[t] || 0) + 1; nCorr++; } });
   const items = masterItems();
   const types = Object.keys(c).filter(t => FIX_ITEMS[t]);
   const opts2 = (t, kind, def) => {
@@ -597,8 +634,8 @@ function fixLinesDialog(p, after) {
   const codeOfType = t => modelFor(t, eq);
   const m = modal({
     title: '図面の器具を明細に入れる', wide: true,
-    body: `<p class="small muted" style="margin-top:0">種類ごとに、入れる品目と数を確かめてください。前に入れた器具の行は入れ直します。${skip ? `「判定保留」「器具ではない」の ${skip} 個は入れません。` : ''}</p>
-      <div class="grid" style="gap:10px">${types.map(t => `<div class="card" style="padding:12px" data-ft="${t}"><div class="row" style="margin-bottom:8px"><b>${esc(FIX_NAMES[t])}</b><span class="pill info">図面で ${c[t]} 個</span>${codeOfType(t) ? `<span class="pill ok">図面の品番 ${esc(codeOfType(t))}</span>` : ''}</div>
+    body: `<p class="small muted" style="margin-top:0">種類ごとに、入れる品目と数を確かめてください。前に入れた器具の行は入れ直します。${skip ? `「判定保留」「器具ではない」の ${skip} 個は入れません。` : ''}${nCorr ? `種類は辞書と寸法で照合した補正後の表示です（補正 ${nCorr} 件。理由は図面タブのシンボル判定の一覧で見られます）。` : ''}</p>
+      <div class="grid" style="gap:10px">${types.map(t => `<div class="card" style="padding:12px" data-ft="${t}"><div class="row" style="margin-bottom:8px"><b>${esc(FIX_NAMES[t])}</b><span class="pill info">図面で ${c[t]} 個</span>${corrIn[t] ? `<span class="pill warn">うち補正 ${corrIn[t]} 件</span>` : ''}${codeOfType(t) ? `<span class="pill ok">図面の品番 ${esc(codeOfType(t))}</span>` : ''}</div>
         <div class="grid g3"><label class="f">本体<select class="in" data-k="body">${opts2(t, 'mat', FIX_ITEMS[t][0])}</select></label>
         <label class="f">取付の手間<select class="in" data-k="labor">${opts2(t, 'labor', FIX_ITEMS[t][1])}</select></label>
         <label class="f">数<input class="in num" type="number" inputmode="numeric" data-k="n" value="${c[t]}"></label></div></div>`).join('') || '<p class="muted">明細に入れられる器具がありません。</p>'}</div>`,
@@ -613,7 +650,7 @@ function fixLinesDialog(p, after) {
       ['body', 'labor'].forEach(k => {
         const id = $(`[data-k=${k}]`, row).value; const it = id && items.find(i => i.id === id); if (!it) return;
         /* ステンレス流しは寸法で作ってもらう物なので、図面の大きさ（長さ×奥行）を規格に書いておく */
-        const dim = t === 'trough' && k === 'body' ? [...new Set(fx.filter(x => x.t === t && x.b).map(x => { const a = Math.abs(x.b[2] - x.b[0]), b2 = Math.abs(x.b[3] - x.b[1]); return `長さ${fmt(Math.max(a, b2), 2)}m×奥行${fmt(Math.min(a, b2), 2)}m`; }))].join('・') : '';
+        const dim = t === 'trough' && k === 'body' ? [...new Set(fx.filter((x, xi) => shownFixType(TF, x, xi) === t && x.b).map(x => { const a = Math.abs(x.b[2] - x.b[0]), b2 = Math.abs(x.b[3] - x.b[1]); return `長さ${fmt(Math.max(a, b2), 2)}m×奥行${fmt(Math.min(a, b2), 2)}m`; }))].join('・') : '';
         p.lines.push({ id: uid('l'), itemId: it.id, name: it.name, spec: [it.spec, dim].filter(Boolean).join(' '), unit: it.unit, kind: it.kind, price: it.price || '', cost: '', loss: '', sheet: 0, cat: it.cat, qty: n, basis: null, fromFix: t, ...(k === 'body' && codeOfType(t) ? { code: codeOfType(t) } : {}) });
         added++;
       });
@@ -884,6 +921,9 @@ function stepRooms(ctx) {
   const FIX_SIZE = { toilet: [0.46, 0.8], urinal: [0.4, 0.36], counter: [1.2, 0.5], sink: [0.45, 0.36], slop: [0.8, 0.52], trough: [3.6, 0.6], bath: [1.6, 1.6], kitchen: [2.55, 0.65] };
   const BACKS = [['N', '上'], ['E', '右'], ['S', '下'], ['W', '左']];
   const fxList = () => (p.drawing && p.drawing.fixtures) || [];
+  /* 図面に出す器具：タイプ補正がある物は補正後の種類で描く（保存データはそのまま。
+   * 並びと数は fxList と同じなので、タップの番号もそのまま合う） */
+  const fxDisplayList = () => { const fx = fxList(); if (!p.drawing) return fx; const TF = typeFixMap(p.drawing); return fx.map((x, k) => (TF[k] && TF[k].shown) ? { ...x, t: TF[k].shown, ot: x.t } : x); };
   const owner = () => { const m = new Map(); p.rooms.forEach(r => (r.faces || []).forEach(i => m.set(i, r.color)));
     /* 隣にまとめた区画は、まとめ先の部屋の色で出す */
     Object.entries((p.drawing && p.drawing.faceJoin) || {}).forEach(([a, b]) => { if (!m.has(+a) && m.has(b)) m.set(+a, m.get(b)); });
@@ -1063,7 +1103,8 @@ function stepRooms(ctx) {
         const fx = fxList();
         const x = fx[fsel];
         const types = Object.entries(FIX_NAMES);
-        bar.innerHTML = x ? `<b class="small">選んだ器具</b>
+        const tfSel = x ? typeFixMap(p.drawing)[fsel] : null;
+        bar.innerHTML = x ? `<b class="small">選んだ器具</b>${tfSel ? `<span class="small" style="color:var(--warn)">${tfSel.shown ? `表示は「${esc(FIX_NAMES[tfSel.shown] || tfSel.shown)}」に補正中です。ここで種類を変えると、その判断が優先されます` : `要確認：${esc(tfSel.reason)}`}</span>` : ''}
             <select class="in" data-fx="t" style="width:auto;min-height:40px">${types.map(([k, n]) => `<option value="${k}" ${x.t === k ? 'selected' : ''}>${n}</option>`).join('')}</select>
             <label class="row small muted" style="gap:6px">壁側<select class="in" data-fx="back" style="width:auto;min-height:40px"><option value="">—</option>${BACKS.map(([k, n]) => `<option value="${k}" ${x.back === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
             ${(x.t === 'toilet' || x.t === 'counter') ? `<button class="btn sm" data-act="fxFlip">コンセントを反対側へ${x.flip ? '（反対側にしています）' : ''}</button>` : ''}
@@ -1230,7 +1271,7 @@ function stepRooms(ctx) {
     if (p.drawing && p.drawing.plan) {
       view = planView(body.querySelector('#dwgView'), p.drawing.plan, {
         keep: keepV,
-        selected: () => sel, owner, fixtures: fxList, symbols: () => symList(p.drawing).map(s => ({ b: s.b, color: SYM_VERDICTS[s.verdict].color, label: s.verdict === 'hit' ? s.category : s.verdict === 'near' ? '類似' : '不明', on: s.k === symSel })), roomJudge: () => roomJudgeEntries(p.drawing), zones: () => zoneEntries(p.drawing, zoneSel), bg: p.drawing.bg && p.sketch && p.sketch.img ? { ...p.sketch.img, s: p.drawing.bg.s } : null, fixSel: () => (mode === 'fix' ? fsel : -1), mode: () => mode, fixG: p.drawing.fixG || '', fixGd: p.drawing.fixGd || '',
+        selected: () => sel, owner, fixtures: fxDisplayList, symbols: () => symList(p.drawing).map(s => ({ b: s.b, color: SYM_VERDICTS[s.verdict].color, label: s.verdict === 'hit' ? s.category : s.verdict === 'near' ? '類似' : '不明', on: s.k === symSel })), roomJudge: () => roomJudgeEntries(p.drawing), zones: () => zoneEntries(p.drawing, zoneSel), bg: p.drawing.bg && p.sketch && p.sketch.img ? { ...p.sketch.img, s: p.drawing.bg.s } : null, fixSel: () => (mode === 'fix' ? fsel : -1), mode: () => mode, fixG: p.drawing.fixG || '', fixGd: p.drawing.fixGd || '',
         extraTools: `<button class="iconbtn" data-act="dwgFs" title="${dwgFs ? '全画面をやめる' : '全画面で編集する'}" aria-label="${dwgFs ? '全画面をやめる' : '全画面で編集する'}">${icon(dwgFs ? 'shrink' : 'full')}</button>`,
         marks: () => faceMarks(),
         /* 部屋にした区画は、区画ごとの番号を消して、部屋に1つだけ名前と広さを出す（かつ「まとめたら細かい区画の数字消して真ん中にまとめた数字に」） */
