@@ -3314,18 +3314,23 @@ export const SYM_VERDICTS = {
  * 器具のデータには外形しか無いので、判定に使う特徴は寸法だけ（円弧の割合・輪郭の閉じなどは null＝ゲートを通す）。
  * userDict（自分の辞書：利用者が「これは何か」を教えた { name, short, long } の配列）が最優先。
  *   寸法が実測パターンと同じ許容（±max(18mm, 5%)）で合えば、その名前で検出（mine: true）。
+ * scale（任意）：図面の寸法の自動補正（js/symscale.js）。図面の座標が実寸の scale 倍で
+ *   描かれている時、寸法の判定だけ実寸（寸法÷scale）で行う。戻り値の short/long は
+ *   図面から測ったままの値（表示用）。scale が 1 の時は従来と完全に同じ。
  * 戻り値: { verdict: "hit" | "near" | "unknown", category, score, short, long, mine? }（short/long は mm） */
-export function classifyBox(b, userDict = []) {
+export function classifyBox(b, userDict = [], scale = 1) {
   if (!b || b.length < 4) return { verdict: "unknown", category: null, score: 0, short: 0, long: 0 };
   const w = Math.abs(b[2] - b[0]) * 1000, h = Math.abs(b[3] - b[1]) * 1000;
   const short = Math.min(w, h), long = Math.max(w, h);
+  const sc = (typeof scale === 'number' && Number.isFinite(scale) && scale > 0) ? scale : 1;
+  const eShort = short / sc, eLong = long / sc;
   for (const u of userDict || []) {
     if (!u || !u.name || !(u.short > 0) || !(u.long > 0)) continue;
     const tolS = Math.max(18, u.short * 0.05), tolL = Math.max(18, u.long * 0.05);
-    if (Math.abs(short - u.short) <= tolS && Math.abs(long - u.long) <= tolL)
+    if (Math.abs(eShort - u.short) <= tolS && Math.abs(eLong - u.long) <= tolL)
       return { verdict: "hit", category: u.name, score: 1, short, long, mine: true };
   }
-  const r = classifySymbol({ short, long, arcShare: null, closed: null, innerClosed: null, dividers: null });
+  const r = classifySymbol({ short, long, arcShare: null, closed: null, innerClosed: null, dividers: null }, sc);
   if (r.result === "不明") return { verdict: "unknown", category: null, score: r.score, short, long, second: r.second, secondScore: r.secondScore, chairScore: r.chairScore };
   if (r.result === "要確認") return { verdict: "near", category: r.category, score: r.score, short, long, second: r.second, secondScore: r.secondScore, chairScore: r.chairScore, sizeVeto: r.sizeVeto };
   return { verdict: "hit", category: r.result, score: r.score, short, long, second: r.second, secondScore: r.secondScore, chairScore: r.chairScore };
@@ -3336,17 +3341,20 @@ export function classifyBox(b, userDict = []) {
  * ctx（任意）: buildChairContexts が作る文脈。ある時だけ、「類似」を文脈で確定に上げる
  * （椅子ルートと衛生ルート。下の文脈判定の節を参照）。
  * ctx が無い時の戻り値は従来と完全に同じ。
+ * scale（任意）：classifyBox と同じ寸法の自動補正。判定だけ実寸で行い、戻り値の寸法は測ったまま。
  * 戻り値は classifyBox と同じ形 */
-export function classifyCluster(f, userDict = [], ctx = null) {
+export function classifyCluster(f, userDict = [], ctx = null, scale = 1) {
   const short = f && f.short, long = f && f.long;
   if (!(short > 0) || !(long > 0)) return { verdict: "unknown", category: null, score: 0, short: 0, long: 0 };
+  const sc = (typeof scale === 'number' && Number.isFinite(scale) && scale > 0) ? scale : 1;
+  const eShort = short / sc, eLong = long / sc;
   for (const u of userDict || []) {
     if (!u || !u.name || !(u.short > 0) || !(u.long > 0)) continue;
     const tolS = Math.max(18, u.short * 0.05), tolL = Math.max(18, u.long * 0.05);
-    if (Math.abs(short - u.short) <= tolS && Math.abs(long - u.long) <= tolL)
+    if (Math.abs(eShort - u.short) <= tolS && Math.abs(eLong - u.long) <= tolL)
       return { verdict: "hit", category: u.name, score: 1, short, long, mine: true };
   }
-  const r = classifySymbol({ short, long, arcShare: f.arcShare != null ? f.arcShare : null, closed: f.closed != null ? f.closed : null, innerClosed: null, dividers: f.dividers != null ? f.dividers : null });
+  const r = classifySymbol({ short, long, arcShare: f.arcShare != null ? f.arcShare : null, closed: f.closed != null ? f.closed : null, innerClosed: null, dividers: f.dividers != null ? f.dividers : null }, sc);
   if (r.result === "不明") return { verdict: "unknown", category: null, score: r.score, short, long, second: r.second, secondScore: r.secondScore, chairScore: r.chairScore };
   if (r.result === "要確認") return promoteChair({ verdict: "near", category: r.category, score: r.score, short, long, second: r.second, secondScore: r.secondScore, chairScore: r.chairScore, sizeVeto: r.sizeVeto }, ctx);
   return { verdict: "hit", category: r.result, score: r.score, short, long, second: r.second, secondScore: r.secondScore, chairScore: r.chairScore };
@@ -3426,7 +3434,10 @@ export function promoteChair(r, ctx) {
 /* 候補全体（clusters と、その素の判定 base）と周囲の情報 env から、候補ごとの文脈を作る。
  * env: { zones: [{name, faces:[区画の i]}], faces: [{i, poly}], fixtures: [{b, t}], texts: [{t| s, x, y}] }
  * 戻り値: clusters と同じ並びの配列（文脈で決着しうる「類似」候補以外は null） */
-export function buildChairContexts(clusters, base, env = {}) {
+/* scale（任意、既定 1）：寸法の自動補正。「同じ寸法」の許容（実寸で 45mm）は、
+ * 図面の測ったままの寸法で比べる時は scale 倍にして使う（距離の根拠は実寸のまま） */
+export function buildChairContexts(clusters, base, env = {}, scale = 1) {
+  const repTol = CHAIR_REP_TOL * ((typeof scale === 'number' && Number.isFinite(scale) && scale > 0) ? scale : 1);
   const out = new Array((clusters || []).length).fill(null);
   if (!clusters || !clusters.length) return out;
   const zones = env.zones || [], faces = env.faces || [], fixtures = env.fixtures || [], texts = env.texts || [];
@@ -3454,7 +3465,7 @@ export function buildChairContexts(clusters, base, env = {}) {
     let rep = 0;
     for (const k of repPool) {
       if (k === j) continue; const o = clusters[k];
-      if (Math.abs(o.short - x.short) > CHAIR_REP_TOL || Math.abs(o.long - x.long) > CHAIR_REP_TOL) continue;
+      if (Math.abs(o.short - x.short) > repTol || Math.abs(o.long - x.long) > repTol) continue;
       if (Math.hypot((o.b[0] + o.b[2]) / 2 - cx, (o.b[1] + o.b[3]) / 2 - cy) <= CHAIR_REP_R) rep++;
     }
     /* 属する区画（一番小さい物）と、そのゾーン */
@@ -3492,7 +3503,7 @@ export function buildChairContexts(clusters, base, env = {}) {
     const find = a => { while (par.get(a) !== a) { par.set(a, par.get(par.get(a))); a = par.get(a); } return a; };
     for (let a = 0; a < sanIdx.length; a++) for (let b = a + 1; b < sanIdx.length; b++) {
       const x = clusters[sanIdx[a]], y = clusters[sanIdx[b]];
-      if (Math.abs(x.short - y.short) > CHAIR_REP_TOL || Math.abs(x.long - y.long) > CHAIR_REP_TOL) continue;
+      if (Math.abs(x.short - y.short) > repTol || Math.abs(x.long - y.long) > repTol) continue;
       const d = Math.hypot((x.b[0] + x.b[2]) / 2 - (y.b[0] + y.b[2]) / 2, (x.b[1] + x.b[3]) / 2 - (y.b[1] + y.b[3]) / 2);
       if (d <= CHAIR_REP_R) { const ra = find(sanIdx[a]), rb = find(sanIdx[b]); if (ra !== rb) par.set(ra, rb); }
     }
@@ -3505,13 +3516,20 @@ export function buildChairContexts(clusters, base, env = {}) {
 
 /* 戻り値: { result: カテゴリ名 | "要確認" | "不明", score, category, label,
  *   second, secondScore（次点カテゴリとそのスコア）, chairScore（「椅子」カテゴリのスコア。
- *   文脈判定が「形の上では椅子も有力」かを見るために常に返す） } */
-export function classifySymbol(f) {
+ *   文脈判定が「形の上では椅子も有力」かを見るために常に返す） }
+ * scale（任意、既定 1）：図面の寸法の自動補正（js/symscale.js の symScale.factor）。
+ *   図面の座標が実寸の scale 倍で描かれている時、寸法がらみの判定（パターンの寸法照合と
+ *   sizeVeto の寸法帯）だけを実寸（short/long ÷ scale）で行う。形の特徴（円弧の割合・
+ *   閉じ具合・分割線）と縦横比は縮尺で変わらないので、そのまま使う。
+ *   scale が 1 の時は従来と完全に同じ結果になる。 */
+export function classifySymbol(f, scale = 1) {
+  const sc = (typeof scale === 'number' && Number.isFinite(scale) && scale > 0) ? scale : 1;
+  const ff = (sc === 1 || !f || !(f.short > 0) || !(f.long > 0)) ? f : { ...f, short: f.short / sc, long: f.long / sc };
   /* まずカテゴリごとの最良スコアに集約する（同じカテゴリのパターン同士は競合しない。
    * 集約しないと、同寸法のパターンを複数持つカテゴリが「僅差チェック」をすり抜けてしまう） */
   const byCat = new Map();
   for (const e of SYM_DICT) for (const p of e.patterns) {
-    const s = scorePattern(p, f);
+    const s = scorePattern(p, ff);
     if (s == null) continue;
     const cur = byCat.get(e.category);
     if (!cur || s > cur.score) byCat.set(e.category, { score: s, category: e.category, kind: e.kind, label: p.label || p.origin });
@@ -3526,7 +3544,7 @@ export function classifySymbol(f) {
   if (!hits.length || hits[0].score < SYM_THRESHOLD) return { result: "不明", score: hits.length ? hits[0].score : 0, category: null, label: null, ...extra };
   /* 寸法特性の制限：形のスコアが十分でも、寸法が実在帯の外なら確定しない（類似に落とす）。
    * sizeVeto が付いた類似は、文脈判定（promoteChair）でも確定に上げない */
-  const veto = sizeVetoReason(hits[0].category, f);
+  const veto = sizeVetoReason(hits[0].category, ff);
   if (veto) return { result: "要確認", score: hits[0].score, category: hits[0].category, label: hits[0].label, sizeVeto: veto, ...extra };
   if (hits.length > 1 && hits[0].category !== hits[1].category && hits[0].score - hits[1].score < 0.05)
     return { result: "要確認", score: hits[0].score, category: hits[0].category, label: hits[0].label, ...extra };

@@ -17,6 +17,7 @@ import { judgeRooms, ROOM_JUDGE } from './roomjudge.js';
 import { computeZones, splitFacesByLine, detectTableAreas } from './zones.js';
 import { supplementFaces } from './polygonize.js';
 import { extractDxfDims, checkDimensions, dimCheckFor } from './dxf-dims.js';
+import { estimateSymScale, symScaleFor } from './symscale.js';
 import { USES, DEF_LM, needCount, pitchFor, luxOf, wirePlan, cableQty, pip, polyD } from './lighting.js';
 /* iPhone・iPad では、選べるファイルの種類を絞ると .jww・.jwc・.dxf が灰色になって選べない（iPhone がこの拡張子を知らないため）。
    なので iPhone・iPad では絞らない。何を選んでも、読み込む時に拡張子で見分けるので困らない */
@@ -415,20 +416,23 @@ function symList(d) {
   const zsig = (d.zones || []).map(z => `${z.id || ''}|${z.name || ''}|${(z.faces || []).length}`).join(';');
   const faces = (d.plan && d.plan.faces) || [];
   const src2 = (d && d.src2) || null;
+  /* 寸法の自動補正（js/symscale.js）：図面の証拠から推定した倍率。辞書の寸法判定だけに効かせる */
+  const ss = symScaleFor(d);
+  const scale = (ss && ss.factor > 0) ? ss.factor : 1;
   const c = symCache.get(d);
-  if (c && c.from === fx && c.fu === fu && c.ver === symVer && c.zsig === zsig && c.faces === faces && c.src2 === src2) return c.list;
+  if (c && c.from === fx && c.fu === fu && c.ver === symVer && c.zsig === zsig && c.faces === faces && c.src2 === src2 && c.ss === ss) return c.list;
   const mine = userSyms();
-  const list = fx.map((x, k) => ({ k, b: x && x.b, t: x && x.t, ...(x && x.b ? classifyBox(x.b, mine) : { verdict: 'unknown', category: null, score: 0, short: 0, long: 0 }) })).filter(s => s.b);
-  const baseFu = fu.map(x => (x && x.b) ? classifyCluster(x, mine) : null);
+  const list = fx.map((x, k) => ({ k, b: x && x.b, t: x && x.t, ...(x && x.b ? classifyBox(x.b, mine, scale) : { verdict: 'unknown', category: null, score: 0, short: 0, long: 0 }) })).filter(s => s.b);
+  const baseFu = fu.map(x => (x && x.b) ? classifyCluster(x, mine, null, scale) : null);
   let ctxs = [];
-  try { ctxs = buildChairContexts(fu, baseFu, { zones: d.zones || [], faces, fixtures: fx, texts: (src2 && src2.texts) || [] }); } catch (e) { ctxs = []; }
+  try { ctxs = buildChairContexts(fu, baseFu, { zones: d.zones || [], faces, fixtures: fx, texts: (src2 && src2.texts) || [] }, scale); } catch (e) { ctxs = []; }
   fu.forEach((x, j) => {
     if (!x || !x.b) return;
-    const r = ctxs[j] ? classifyCluster(x, mine, ctxs[j]) : baseFu[j];
+    const r = ctxs[j] ? classifyCluster(x, mine, ctxs[j], scale) : baseFu[j];
     if (!r || r.verdict === 'unknown') return; /* 家具の候補は「不明」を並べない（線の集まりは数が多く、判定できた物だけ出す） */
     list.push({ k: 10000 + j, b: x.b, t: null, furn: true, ...r });
   });
-  symCache.set(d, { from: fx, fu, ver: symVer, zsig, faces, src2, list });
+  symCache.set(d, { from: fx, fu, ver: symVer, zsig, faces, src2, ss, list });
   return list;
 }
 /* シンボルの判定の一覧：行を押すと図面のその場所へ飛ぶ */
@@ -440,7 +444,7 @@ function symSummary(d, selK = -1) {
   const rows = S.slice(0, 150).map(s => `<div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn sm" data-sym="${s.k}" style="justify-content:flex-start;gap:8px;min-height:40px;flex:1;text-align:left${s.k === selK ? ';border-color:var(--accent);background:rgba(255,138,61,.10)' : ''}"><span style="width:12px;height:12px;border-radius:3px;background:${SYM_VERDICTS[s.verdict].color};flex:none"></span><b>${esc(label(s))}</b><span class="muted">${Math.round(s.short)}×${Math.round(s.long)}mm</span>${s.furn ? '<span class="muted">（線から検出）</span>' : ''}${s.context ? '<span class="muted">（文脈で確定）</span>' : ''}${s.mine ? '<span class="muted">（自分の辞書）</span>' : s.t && FIX_NAMES[s.t] ? `<span class="muted">（今の判定：${esc(FIX_NAMES[s.t])}）</span>` : ''}</button><button class="btn sm" data-symreg="${s.k}" style="min-height:40px;flex:none">${s.mine ? '直す' : 'これは何？'}</button></div>`).join('');
   const mine = userSyms();
   const mineHtml = mine.length ? `<div style="margin-top:10px"><b class="small">自分の辞書（${mine.length}件）</b><div style="display:grid;gap:6px;margin-top:6px">${mine.map(u => `<div class="row" style="gap:6px"><span class="pill" style="border:1px solid ${SYM_VERDICTS.hit.color};color:${SYM_VERDICTS.hit.color}">${esc(u.name)}</span><span class="small muted">${u.short}×${u.long}mm</span><span class="spacer"></span><button class="btn sm" data-symedit="${u.id}">名前を直す</button><button class="btn sm ghost danger" data-symdel="${u.id}">消す</button></div>`).join('')}</div></div>` : '';
-  return `<div class="row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)"><b class="small">シンボルの判定（辞書）</b>
+  return `${(d.dims && d.dims.length) ? '' : symScaleLine(d)}<div class="row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)"><b class="small">シンボルの判定（辞書）</b>
     ${['hit', 'near', 'unknown'].map(v => `<span class="pill" style="border:1px solid ${SYM_VERDICTS[v].color};color:${SYM_VERDICTS[v].color}">${SYM_VERDICTS[v].name} ${cnt[v]}</span>`).join('')}
     <span class="small muted">器具は寸法、机・椅子は線の形から判定しています。行を押すと図面のその場所へ飛びます。色は図面の「符」ボタンで消せます</span></div>
     <div style="margin-top:8px;display:grid;gap:6px;max-height:320px;overflow:auto">${rows}${S.length > 150 ? `<div class="small muted">ほか ${S.length - 150} 件（先頭150件だけ出しています）</div>` : ''}</div>${mineHtml}`;
@@ -524,6 +528,16 @@ function zoneSummary(d, selId = '') {
  * 古い保存には dims が無いので、その時は出さない） */
 /* 倍率の表示（有効数字3桁まで。50.0 → 50、0.0200 → 0.02） */
 const fmtFactor = v => String(Number(v.toPrecision(3)));
+/* シンボルの大きさの自動補正（js/symscale.js の推定）の表示。補正が効いている時だけ出す。
+ * 倍率は「測った寸法に掛けると実寸になる値」（1 ÷ factor）で出す。根拠も添える。
+ * 寸法のある図面では寸法の答え合わせの隣（dimSummary）に、無い図面では
+ * シンボルの判定の所（symSummary）に出す（二重には出さない） */
+function symScaleLine(d) {
+  const ss = symScaleFor(d);
+  if (!ss || !(ss.factor > 0) || Math.abs(ss.factor - 1) <= 0.01) return '';
+  const basis = ss.source === 'dims' ? `寸法${ss.n}件で照合` : `便器${ss.n}件の大きさから推定`;
+  return `<div class="small" style="margin-top:6px">シンボルの大きさを自動補正 ×${fmtFactor(1 / ss.factor)}（${basis}）</div>`;
+}
 function dimSummary(d) {
   const dims = (d && d.dims) || [];
   if (!dims.length) return '';
@@ -548,7 +562,7 @@ function dimSummary(d) {
   }
   return `<div class="row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)"><b class="small">寸法</b>
     <span class="pill info">${dims.length}件</span>
-    <span class="small muted">図面に書かれていた寸法です（mm）。見積には入りません</span></div>${check}
+    <span class="small muted">図面に書かれていた寸法です（mm）。見積には入りません</span></div>${check}${symScaleLine(d)}
     <div class="row" style="gap:6px;margin-top:8px">${chips}${dims.length > 60 ? `<span class="small muted">ほか ${dims.length - 60} 件</span>` : ''}</div>`;
 }
 
@@ -1393,6 +1407,9 @@ function stepRooms(ctx) {
         }
         /* 机・椅子などの家具：線の集まりから形の候補を切り出して覚える（判定はシンボル辞書。器具・見積の数字は変えない） */
         if (cad) { try { p.drawing.furn = detectFurniture(res.plan.segs || [], allFixtures, res.doorList || []); } catch (e2) { console.warn('家具の検出に失敗', e2); p.drawing.furn = []; } }
+        /* シンボルの大きさの自動補正：寸法の答え合わせと、拾った器具・家具の候補から倍率を推定して覚える。
+         * 効くのは辞書の寸法判定だけ（図面の線・区画・部屋・見積は変えない）。証拠が弱い時は補正なし（factor 1） */
+        if (cad) { try { p.drawing.symScale = estimateSymScale({ dimCheck, fixtures: allFixtures, clusters: p.drawing.furn || [] }); } catch (e2) { console.warn('シンボルの大きさの推定に失敗', e2); } }
         /* 新しい読み取り（js/reader2）：図枠・表の印を作って覚えておく。今の読み取りの結果（区画・器具）は変えない。画面に出すのは「新しい読み取り」を選んだ時だけ */
         /* 解析を後で作り直せるように、文字・長い線・ドアを覚えておく（解析の作りを直した時、開いただけで新しい解析になる） */
         if (cad) p.drawing.src2 = { texts: res.texts || [], segs: res.longSegs && res.longSegs.length ? res.longSegs : [], doors: res.doorList || [] };
