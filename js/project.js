@@ -15,7 +15,7 @@ import { detectFurniture } from './furndetect.js';
 import { rescueFixtures, mergeFixtures } from './fixrescue.js';
 import { judgeRooms, ROOM_JUDGE } from './roomjudge.js';
 import { computeZones, splitFacesByLine, detectTableAreas } from './zones.js';
-import { supplementFaces } from './polygonize.js';
+import { supplementFaces, polygonizeFaces } from './polygonize.js';
 import { extractDxfDims, checkDimensions, dimCheckFor } from './dxf-dims.js';
 import { estimateSymScale, symScaleFor } from './symscale.js';
 import { correctFixtureTypes } from './typefix.js';
@@ -448,15 +448,25 @@ function typeFixMap(d) {
   const tsig = fx.map(x => `${x.t}:${x.edited ? 1 : 0}`).join(',');
   const zsig = (d.zones || []).map(z => z.name || '').join(';');
   const c = tfCache.get(d);
-  if (c && c.S === S && c.tsig === tsig && c.zsig === zsig) return c.map;
+  if (c && c.S === S && c.tsig === tsig && c.zsig === zsig && c.psegs === ((d.plan && d.plan.segs) || null)) return c.map;
   const byK = new Map(S.filter(s => !s.furn).map(s => [s.k, s]));
   const verdicts = fx.map((x, k) => { const s = byK.get(k); return s ? { verdict: s.verdict, category: s.category, score: s.score, sizeVeto: s.sizeVeto || null } : null; });
   const ss = symScaleFor(d);
   const scale = (ss && ss.factor > 0) ? ss.factor : 1;
+  /* 幾何チェック（sw.45）の材料：面と線は、要る器具がある図面でだけ用意する。
+   * 面の輪郭化は図面全体にかかるので、浴槽型が無い図面では計算しない */
+  const psegs = (d.plan && d.plan.segs) || null;
+  const needFaces = fx.some(x => x.t === 'bath');
+  const needSegs = needFaces || fx.some((x, k) => (x.t === 'counter' || x.t === 'kitchen') && verdicts[k] && (verdicts[k].category === '洋式大便器' || verdicts[k].category === '小便器'));
+  let faces = null, segs = null;
+  if (needSegs && psegs && psegs.length) {
+    segs = psegs;
+    if (needFaces) { try { faces = polygonizeFaces(psegs); } catch (e) { faces = null; } }
+  }
   let map = fx.map(() => null);
-  try { map = correctFixtureTypes(fx, { verdicts, texts: (d.src2 && d.src2.texts) || [], zoneNames: (d.zones || []).map(z => z.name).filter(Boolean), scale }); }
+  try { map = correctFixtureTypes(fx, { verdicts, texts: (d.src2 && d.src2.texts) || [], zoneNames: (d.zones || []).map(z => z.name).filter(Boolean), scale, faces, segs }); }
   catch (e) { console.warn('器具のタイプ補正に失敗', e); }
-  tfCache.set(d, { S, tsig, zsig, map });
+  tfCache.set(d, { S, tsig, zsig, psegs, map });
   return map;
 }
 /* 器具の「表示する種類」（補正があれば補正後、無ければ保存してある種類） */

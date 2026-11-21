@@ -3,7 +3,7 @@
  * 実測（正しさの物差しの分析）から取った代表値。座標は m、箱は [x0,y0,x1,y1]。 */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { correctFixtureTypes, hasBathContext } from '../js/typefix.js';
+import { correctFixtureTypes, hasBathContext, countBowls, hasTankBand } from '../js/typefix.js';
 
 const fx = (t, w, h, x = 0, y = 0, extra = {}) => ({ t, b: [x, y, x + w, y + h], ...extra });
 const hit = category => ({ verdict: 'hit', category, score: 0.97 });
@@ -128,4 +128,84 @@ test('浴室文脈：文字とゾーン名の両方を見る', () => {
   assert.equal(hasBathContext([{ t: '浴室' }], []), true);
   assert.equal(hasBathContext([], ['ユニットバス']), true);
   assert.equal(hasBathContext([], ['洗面所']), false);
+});
+
+/* ===== ルール6 ボウルが2個ある洗面カウンター（sw.45・幾何） ===== */
+
+const face = (cx, cy, w, h, area) => ({ poly: [[cx - w / 2, cy - h / 2], [cx + w / 2, cy - h / 2], [cx + w / 2, cy + h / 2], [cx - w / 2, cy + h / 2]], area });
+/* 三井屋 F3 の実測：1655×755 の箱に 500×321mm・0.160㎡ のボウル面が2枚 */
+const f3faces = [face(0.45, 0.38, 0.500, 0.321, 0.160), face(1.20, 0.38, 0.500, 0.321, 0.160)];
+
+test('ボウル2個：浴槽と言われた箱に同寸法のボウルが2個 → 洗面台に補正（三井屋 F3）', () => {
+  const r = run([fx('bath', 1.655, 0.755)], [near('浴槽')], { faces: f3faces });
+  assert.equal(r[0].shown, 'counter');
+  assert.equal(r[0].rule, 'bath-bowls');
+  assert.equal(r[0].confirm, false);
+});
+
+test('ボウル2個：ボウルが1個だけの浴槽は触らない（真の浴槽）', () => {
+  const r = run([fx('bath', 1.050, 0.843)], [unk], { faces: [face(0.52, 0.42, 0.500, 0.321, 0.160)] });
+  assert.equal(r[0], null);
+});
+
+test('ボウル2個：辞書が浴槽と言い切る物は触らない', () => {
+  const r = run([fx('bath', 1.655, 0.755)], [hit('浴槽')], { faces: f3faces });
+  assert.equal(r[0], null);
+});
+
+test('ボウル2個：面が無い図面では発火しない', () => {
+  const r = run([fx('bath', 1.655, 0.755)], [near('浴槽')]);
+  assert.equal(r[0], null);
+});
+
+test('countBowls：大きさの違う面は別々に数える', () => {
+  const b = [0, 0, 1.655, 0.755];
+  assert.equal(countBowls(b, f3faces), 2);
+  assert.equal(countBowls(b, [face(0.45, 0.38, 0.500, 0.321, 0.160), face(1.20, 0.38, 0.340, 0.430, 0.128)]), 1);
+  assert.equal(countBowls(b, []), 0);
+  assert.equal(countBowls(b, null), 0);
+});
+
+/* ===== ルール7 タンク帯の無い小便器（sw.45・幾何） ===== */
+
+/* 卵形ボウルの近似：短い線が下半分に集まり、帯になる直線は無い（三井屋 F12 の形） */
+const eggSegs = [];
+for (let i = 0; i < 10; i++) {
+  const a = (i / 10) * Math.PI, cx = 0.291, cy = 0.30, rx = 0.17, ry = 0.24;
+  eggSegs.push([cx + rx * Math.cos(a), cy + ry * Math.sin(a), cx + rx * Math.cos(a + 0.31), cy + ry * Math.sin(a + 0.31)]);
+}
+const tankSegs = [...eggSegs, [0.03, 0.50, 0.55, 0.50]];   /* 壁側 200mm 内側に幅の9割の直線＝タンク帯 */
+
+test('タンク帯なし：洗面台と言われた卵形ボウル → 小便器に補正（三井屋 F12）', () => {
+  const F = [fx('counter', 0.582, 0.703)];
+  const r = run(F, [near('洋式大便器')], { segs: eggSegs, texts: [{ t: '男子トイレ', c: [0.3, 3.28] }] });
+  assert.equal(r[0].shown, 'urinal');
+  assert.equal(r[0].rule, 'urinal-notank');
+});
+
+test('タンク帯なし：タンク帯がある本物の便器は触らない', () => {
+  const F = [fx('counter', 0.582, 0.703)];
+  const r = run(F, [near('洋式大便器')], { segs: tankSegs, texts: [{ t: '男子トイレ', c: [0.3, 3.28] }] });
+  assert.equal(r[0], null);
+});
+
+test('タンク帯なし：線が無い図面では判定不能として発火しない', () => {
+  const F = [fx('counter', 0.582, 0.703)];
+  const r = run(F, [near('洋式大便器')], { texts: [{ t: '男子トイレ', c: [0.3, 3.28] }] });
+  assert.equal(r[0], null);
+});
+
+test('タンク帯なし：水回りの文字が近くに無い物は触らない', () => {
+  const F = [fx('counter', 0.582, 0.703)];
+  const r = run(F, [near('洋式大便器')], { segs: eggSegs });
+  assert.equal(r[0], null);
+});
+
+test('hasTankBand：帯あり／なし／判定不能', () => {
+  const b = [0, 0, 0.582, 0.703];
+  assert.equal(hasTankBand(b, tankSegs), true);
+  assert.equal(hasTankBand(b, eggSegs), false);
+  assert.equal(hasTankBand(b, [[0.1, 0.1, 0.2, 0.1]]), null);
+  assert.equal(hasTankBand(b, []), null);
+  assert.equal(hasTankBand(b, null), null);
 });
