@@ -13,6 +13,7 @@ import { planView, roomColor } from './planview.js';
 import { classifyFixtureDisplay, classifyCluster, buildChairContexts, SYM_VERDICTS, SYM_DICT } from './symdict.js';
 import { detectFurniture } from './furndetect.js';
 import { rescueFixtures, mergeFixtures } from './fixrescue.js';
+import { applyEdgeFix, revertEdgeFix } from './facerepair.js';
 import { judgeRooms, ROOM_JUDGE } from './roomjudge.js';
 import { computeZones, splitFacesByLine, detectTableAreas } from './zones.js';
 import { supplementFaces, polygonizeFaces } from './polygonize.js';
@@ -1140,7 +1141,7 @@ function stepRooms(ctx) {
     if (fl) fl.innerHTML = [...p.drawing.plan.faces].sort((a, b) => a.no - b.no).map(f => `<button data-face="${f.i}" class="${sel.has(f.i) ? 'on' : ''} ${own.has(f.i) && !sel.has(f.i) ? 'used' : ''}">区画${f.no}${f.name ? ' ' + esc(f.name) : ''} ${Math.round(f.area * 100) / 100}㎡</button>`).join('');
     const bar = body.querySelector('#dwgBar');
     if (bar) bar.innerHTML = sel.size
-      ? `<span class="small"><b>${sel.size} 区画</b>を選んでいます${selGeo ? `（床 ${Math.round((selGeo.area - (selGeo.holes && !holesOn ? selGeo.holes.area : 0)) * 100) / 100}㎡）` : ''}。続けてタップで足す・もう一度で外す。</span>${selGeo && selGeo.holes ? `<label class="row small" style="gap:6px;width:100%;cursor:pointer"><input type="checkbox" data-holes ${holesOn ? 'checked' : ''} style="width:20px;height:20px">中の机・棚などで囲まれた所 ${selGeo.holes.area}㎡ も床に入れる（図面で橙に塗った所）</label>` : ''}<span class="spacer"></span><button class="btn primary" data-act="mkOne">${icon('check')}終了：1部屋にする</button>${sel.size > 1 ? `<button class="btn" data-act="mkEach">1区画ずつ部屋にする</button>` : ''}<button class="btn" data-act="selSame" title="選んだ区画と同じ広さ・同じ周りの長さの区画（トイレのブースなど）を、まとめて選びます">同じ大きさの区画も選ぶ</button>${[...sel].some(i => own.has(i)) ? `<button class="btn" data-act="unassign">部屋から外す</button>` : ''}<button class="btn" data-act="faceJoin" title="棚や机で割れた小さい区画を、接している長さがいちばん長い隣の区画（部屋）の床に入れます">隣の部屋にまとめる</button><button class="btn" data-act="faceOff" title="部屋ではない所（表・家具・外など）を、灰色にして数えないようにします">区画ではない</button>${[...sel].some(i => (p.drawing.faceOff || {})[i] || (p.drawing.faceJoin || {})[i] != null) ? `<button class="btn" data-act="faceBack">元に戻す</button>` : ''}<button class="btn ghost" data-act="selClear">選ぶのをやめる</button>`
+      ? `<span class="small"><b>${sel.size} 区画</b>を選んでいます${selGeo ? `（床 ${Math.round((selGeo.area - (selGeo.holes && !holesOn ? selGeo.holes.area : 0)) * 100) / 100}㎡）` : ''}。続けてタップで足す・もう一度で外す。</span>${sel.size === 1 && (p.drawing.faceFix || {})[[...sel][0]] ? '<span class="pill info">辺を手直し済み</span>' : ''}${selGeo && selGeo.holes ? `<label class="row small" style="gap:6px;width:100%;cursor:pointer"><input type="checkbox" data-holes ${holesOn ? 'checked' : ''} style="width:20px;height:20px">中の机・棚などで囲まれた所 ${selGeo.holes.area}㎡ も床に入れる（図面で橙に塗った所）</label>` : ''}<span class="spacer"></span><button class="btn primary" data-act="mkOne">${icon('check')}終了：1部屋にする</button>${sel.size > 1 ? `<button class="btn" data-act="mkEach">1区画ずつ部屋にする</button>` : ''}<button class="btn" data-act="selSame" title="選んだ区画と同じ広さ・同じ周りの長さの区画（トイレのブースなど）を、まとめて選びます">同じ大きさの区画も選ぶ</button>${[...sel].some(i => own.has(i)) ? `<button class="btn" data-act="unassign">部屋から外す</button>` : ''}<button class="btn" data-act="faceJoin" title="棚や机で割れた小さい区画を、接している長さがいちばん長い隣の区画（部屋）の床に入れます">隣の部屋にまとめる</button><button class="btn" data-act="faceOff" title="部屋ではない所（表・家具・外など）を、灰色にして数えないようにします">区画ではない</button>${sel.size === 1 ? `<button class="btn" data-act="faceFix" title="壁の段差などを区画の辺が読み取れていない時、この区画の辺だけを、図面の実線に沿うように直します（直せる所が無い時は、何も変わりません）">辺を実線に直す</button>` : ''}${[...sel].some(i => (p.drawing.faceOff || {})[i] || (p.drawing.faceJoin || {})[i] != null || (p.drawing.faceFix || {})[i]) ? `<button class="btn" data-act="faceBack">元に戻す</button>` : ''}<button class="btn ghost" data-act="selClear">選ぶのをやめる</button>`
       : `<span class="small muted">部屋にする区画を順番にタップして、選び終わったら「終了」。そのまま床・壁・天井の仕上げを決められます。</span><span class="spacer"></span><button class="btn sm" data-act="selRest">まだ部屋にしていない区画を全部選ぶ</button>`;
   };
   /* コンセントを器具に合わせて置く（自分で置いた物は残す）。「反対側へ」にした器具は器具の真ん中で反対側 */
@@ -1774,6 +1775,19 @@ function stepRooms(ctx) {
         return;
       }
       if (a === 'fxDone') { fsel = -1; addAt = null; paintSel(); return; }
+      if (a === 'faceFix') {
+        /* 辺を実線に直す（手動のみ・選んだ1区画だけ。js/facerepair.js）。
+         * 自動では絶対にかけない：全区画にかけると他の図面で判定まで変わる事が回帰で分かっているため、
+         * 村中さんの決定（2026-11-22）でボタンだけにした。直せる所が無ければ何も変えない */
+        const d = p.drawing, i = [...sel][0], f = (d.plan.faces || []).find(x => x.i === i);
+        const r = applyEdgeFix(d, i);
+        if (!r.ok) { toast('この区画は、実線に沿う直し方が見つかりませんでした（辺はそのままです）', { ms: 5000 }); return; }
+        /* その区画が入っている部屋は、床の広さを新しい形で計算し直す */
+        p.rooms.forEach(rm => { if (rm.src === 'plan' && (rm.faces || []).includes(i)) regeo(rm); });
+        syncDemoLines(p); touch(p); draw();
+        toast(`区画${f ? f.no : ''} の辺を実線に直しました（床 ${r.before}㎡ → ${r.area}㎡）。選んだまま「元に戻す」で戻せます`, { ms: 6000 });
+        return;
+      }
       if (a === 'faceOff' || a === 'faceJoin' || a === 'faceBack') {
         const d = p.drawing, ids = [...sel]; d.faceOff = { ...(d.faceOff || {}) }; d.faceJoin = { ...(d.faceJoin || {}) };
         const before = { off: { ...(p.drawing.faceOff || {}) }, join: { ...(p.drawing.faceJoin || {}) } };
@@ -1782,7 +1796,9 @@ function stepRooms(ctx) {
           const empty = p.rooms.filter(r => r.src === 'plan' && r.faces && !r.faces.length).map(r => r.id); p.rooms = p.rooms.filter(r => !empty.includes(r.id)); };
         let n = 0, miss = 0; const pairs = [];
         if (a === 'faceOff') { const S = new Set(ids); pull(S); ids.forEach(i => { d.faceOff[i] = true; delete d.faceJoin[i]; Object.keys(d.faceJoin).forEach(k => { if (d.faceJoin[k] === i) delete d.faceJoin[k]; }); n++; }); }
-        if (a === 'faceBack') { const S = new Set(ids.filter(i => d.faceJoin[i] != null)); pull(S); ids.forEach(i => { if (d.faceOff[i] || d.faceJoin[i] != null) n++; delete d.faceOff[i]; delete d.faceJoin[i]; }); }
+        if (a === 'faceBack') { const S = new Set(ids.filter(i => d.faceJoin[i] != null)); pull(S); const reverted = []; ids.forEach(i => { let had = false; if (d.faceOff[i] || d.faceJoin[i] != null) had = true; delete d.faceOff[i]; delete d.faceJoin[i]; if (revertEdgeFix(d, i).ok) { had = true; reverted.push(i); } if (had) n++; });
+          /* 辺の手直しを戻した区画が入っている部屋は、床の広さを元の形で計算し直す */
+          reverted.forEach(i => p.rooms.forEach(rm => { if (rm.src === 'plan' && (rm.faces || []).includes(i)) regeo(rm); })); }
         if (a === 'faceJoin') {
           const F = d.plan.faces, S = new Set(ids); pull(S);
           ids.forEach(i => { const f = F.find(o => o.i === i); const nb = f && f.poly && f.poly.length >= 3 ? nbOf(f) : null;
