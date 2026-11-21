@@ -3270,8 +3270,12 @@ export function scorePattern(p, f) {
  *   長さ>820 または 幅>510 は便器として確定しない。
  * - 小便器：幅330〜460・出寸法320〜420（LIXIL/TOTO公表寸法、Pass 2 で奥行上限420に拡張）。
  *   両辺がこの枠に収まらない物は確定しない。
- * - 浴槽：UB浴槽は幅800〜900・在来は700〜750、長さは小型在来の850からUB最大級の1,750まで。
- *   幅680〜950・長さ850〜1,750 の外は確定しない。
+ * - 浴槽：UB浴槽は幅800〜900・在来は700〜750、長さは公表の小型級からUB最大級の1,750まで。
+ *   幅680〜950・長さ850〜1,750 の外は確定しない。なお長さの下限850には、かつて
+ *   実例と誤認した図面由来の「小型浴槽帯」の話が混ざっていた（その実例は和式便器
+ *   だった。BATH_RULE_REVIEW §4.3）。公表寸法では 750〜800 長の小型浴槽も実在する
+ *   ため逆向きのリスクはあるが、正例がゼロの現状では数値は凍結し、本物の浴槽の
+ *   実例で検証できたら再調整する。
  * - 洗面器（単体ボウルの奥行条件）：単体ボウルは奥行380以上が洗面器、360以下は手洗器の帯。
  *   ただし幅が手洗器の上限（500）を超えカウンター幅（600）に届かない中間の物は、
  *   手洗器でも洗面ボウルでもカウンターでもあり得ないので確定しない（奥行≤360・幅520〜580）。
@@ -3334,6 +3338,20 @@ export function classifyBox(b, userDict = [], scale = 1) {
   if (r.result === "不明") return { verdict: "unknown", category: null, score: r.score, short, long, second: r.second, secondScore: r.secondScore, chairScore: r.chairScore };
   if (r.result === "要確認") return { verdict: "near", category: r.category, score: r.score, short, long, second: r.second, secondScore: r.secondScore, chairScore: r.chairScore, sizeVeto: r.sizeVeto };
   return { verdict: "hit", category: r.result, score: r.score, short, long, second: r.second, secondScore: r.secondScore, chairScore: r.chairScore };
+}
+
+/* 器具の「表示用」判定（sw.46）：classifyBox の生判定を、画面に出す段位だけ落とした物。
+ * 器具への確定（classifyBox）は寸法だけが根拠で、形の特徴が無い。実測では
+ * 寸法のみの確定の正解率は 15.9%（13/82）しかなく、形で判定する家具クラスタの
+ * 確定（80.7%、230/285）と大きく違う（FIVE_DRAWING_REREVIEW §5）。そのため
+ * 表示では器具の hit を「類似（要確認）」までに落とし、確定とは出さない。
+ * ただし生の判定は rawVerdict に残し、タイプ補正（js/typefix.js）はそちらを使う
+ * （補正側は寸法以外の裏付けと組み合わせて判断するため）。
+ * 自分の辞書（mine）の hit は利用者本人が教えた判定なので落とさない */
+export function classifyFixtureDisplay(b, userDict = [], scale = 1) {
+  const r = classifyBox(b, userDict, scale);
+  if (r.verdict !== 'hit' || r.mine) return { ...r, rawVerdict: r.verdict };
+  return { ...r, verdict: 'near', rawVerdict: 'hit', capped: true };
 }
 
 /* 線の集まりから切り出した形（js/furndetect.js の候補）を判定する。

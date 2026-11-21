@@ -10,7 +10,7 @@ import { SYS, MANY, sysOptions, rebuild, PIPE_LOSS } from './piping.js';
 import { importDrawing, groupGeom, roomHoles, planCH, orderFaces as orderFacesOf } from './drawing.js';
 import { readWithFixtures, oldFaceLights, roomOpenRuns, FIX_NAMES, FIX_ITEMS, FIX_WORDS } from './legacy.js';
 import { planView, roomColor } from './planview.js';
-import { classifyBox, classifyCluster, buildChairContexts, SYM_VERDICTS, SYM_DICT } from './symdict.js';
+import { classifyFixtureDisplay, classifyCluster, buildChairContexts, SYM_VERDICTS, SYM_DICT } from './symdict.js';
 import { detectFurniture } from './furndetect.js';
 import { rescueFixtures, mergeFixtures } from './fixrescue.js';
 import { judgeRooms, ROOM_JUDGE } from './roomjudge.js';
@@ -423,7 +423,9 @@ function symList(d) {
   const c = symCache.get(d);
   if (c && c.from === fx && c.fu === fu && c.ver === symVer && c.zsig === zsig && c.faces === faces && c.src2 === src2 && c.ss === ss) return c.list;
   const mine = userSyms();
-  const list = fx.map((x, k) => ({ k, b: x && x.b, t: x && x.t, ...(x && x.b ? classifyBox(x.b, mine, scale) : { verdict: 'unknown', category: null, score: 0, short: 0, long: 0 }) })).filter(s => s.b);
+  /* 器具の表示判定は classifyFixtureDisplay：寸法だけが根拠の器具の確定は表示では
+   * 「類似」までに落とす（sw.46）。生の判定は rawVerdict に残り、タイプ補正が使う */
+  const list = fx.map((x, k) => ({ k, b: x && x.b, t: x && x.t, ...(x && x.b ? classifyFixtureDisplay(x.b, mine, scale) : { verdict: 'unknown', category: null, score: 0, short: 0, long: 0 }) })).filter(s => s.b);
   const baseFu = fu.map(x => (x && x.b) ? classifyCluster(x, mine, null, scale) : null);
   let ctxs = [];
   try { ctxs = buildChairContexts(fu, baseFu, { zones: d.zones || [], faces, fixtures: fx, texts: (src2 && src2.texts) || [] }, scale); } catch (e) { ctxs = []; }
@@ -450,14 +452,19 @@ function typeFixMap(d) {
   const c = tfCache.get(d);
   if (c && c.S === S && c.tsig === tsig && c.zsig === zsig && c.psegs === ((d.plan && d.plan.segs) || null)) return c.map;
   const byK = new Map(S.filter(s => !s.furn).map(s => [s.k, s]));
-  const verdicts = fx.map((x, k) => { const s = byK.get(k); return s ? { verdict: s.verdict, category: s.category, score: s.score, sizeVeto: s.sizeVeto || null } : null; });
+  /* タイプ補正には表示用に落とす前の生の判定（rawVerdict）を渡す（sw.46） */
+  const verdicts = fx.map((x, k) => { const s = byK.get(k); return s ? { verdict: s.rawVerdict || s.verdict, category: s.category, score: s.score, sizeVeto: s.sizeVeto || null } : null; });
   const ss = symScaleFor(d);
   const scale = (ss && ss.factor > 0) ? ss.factor : 1;
-  /* 幾何チェック（sw.45）の材料：面と線は、要る器具がある図面でだけ用意する。
-   * 面の輪郭化は図面全体にかかるので、浴槽型が無い図面では計算しない */
+  /* 幾何チェック（sw.45・46）の材料：面と線は、要る器具がある図面でだけ用意する。
+   * 面の輪郭化は図面全体にかかるので、浴槽型が無い図面では計算しない。
+   * 線は sw.46 で、タンク帯の裏付けが要る候補（小便器の列・個室の便器）にも渡す */
   const psegs = (d.plan && d.plan.segs) || null;
   const needFaces = fx.some(x => x.t === 'bath');
-  const needSegs = needFaces || fx.some((x, k) => (x.t === 'counter' || x.t === 'kitchen') && verdicts[k] && (verdicts[k].category === '洋式大便器' || verdicts[k].category === '小便器'));
+  const needSegs = needFaces
+    || fx.some((x, k) => (x.t === 'counter' || x.t === 'kitchen') && verdicts[k] && (verdicts[k].category === '洋式大便器' || verdicts[k].category === '小便器'))
+    || fx.some(x => x.t === 'toilet')
+    || fx.some((x, k) => (x.t === 'counter' || x.t === 'kitchen') && verdicts[k] && verdicts[k].verdict === 'hit' && (verdicts[k].category === 'キッチン・洗濯設備' || verdicts[k].category === '椅子'));
   let faces = null, segs = null;
   if (needSegs && psegs && psegs.length) {
     segs = psegs;
@@ -482,12 +489,12 @@ function symSummary(d, selK = -1) {
   const tfSpan = s => { if (s.furn) return ''; const tf = TF[s.k]; if (!tf) return '';
     if (tf.shown) return `<span style="color:var(--warn)">（タイプ補正：${esc(FIX_NAMES[tf.shown] || tf.shown)}として表示。${esc(tf.reason)}）</span>`;
     if (tf.confirm) return `<span style="color:var(--warn)">（要確認：${esc(tf.reason)}）</span>`; return ''; };
-  const rows = S.slice(0, 150).map(s => `<div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn sm" data-sym="${s.k}" style="justify-content:flex-start;gap:8px;min-height:40px;flex:1;text-align:left${s.k === selK ? ';border-color:var(--accent);background:rgba(255,138,61,.10)' : ''}"><span style="width:12px;height:12px;border-radius:3px;background:${SYM_VERDICTS[s.verdict].color};flex:none"></span><b>${esc(label(s))}</b><span class="muted">${Math.round(s.short)}×${Math.round(s.long)}mm</span>${s.furn ? '<span class="muted">（線から検出）</span>' : ''}${s.context ? '<span class="muted">（文脈で確定）</span>' : ''}${s.mine ? '<span class="muted">（自分の辞書）</span>' : s.t && FIX_NAMES[s.t] ? `<span class="muted">（今の判定：${esc(FIX_NAMES[s.t])}）</span>` : ''}${tfSpan(s)}</button><button class="btn sm" data-symreg="${s.k}" style="min-height:40px;flex:none">${s.mine ? '直す' : 'これは何？'}</button></div>`).join('');
+  const rows = S.slice(0, 150).map(s => `<div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn sm" data-sym="${s.k}" style="justify-content:flex-start;gap:8px;min-height:40px;flex:1;text-align:left${s.k === selK ? ';border-color:var(--accent);background:rgba(255,138,61,.10)' : ''}"><span style="width:12px;height:12px;border-radius:3px;background:${SYM_VERDICTS[s.verdict].color};flex:none"></span><b>${esc(label(s))}</b><span class="muted">${Math.round(s.short)}×${Math.round(s.long)}mm</span>${s.furn ? '<span class="muted">（線から検出）</span>' : ''}${s.capped ? '<span class="muted">（寸法のみの判定）</span>' : ''}${s.context ? '<span class="muted">（文脈で確定）</span>' : ''}${s.mine ? '<span class="muted">（自分の辞書）</span>' : s.t && FIX_NAMES[s.t] ? `<span class="muted">（今の判定：${esc(FIX_NAMES[s.t])}）</span>` : ''}${tfSpan(s)}</button><button class="btn sm" data-symreg="${s.k}" style="min-height:40px;flex:none">${s.mine ? '直す' : 'これは何？'}</button></div>`).join('');
   const mine = userSyms();
   const mineHtml = mine.length ? `<div style="margin-top:10px"><b class="small">自分の辞書（${mine.length}件）</b><div style="display:grid;gap:6px;margin-top:6px">${mine.map(u => `<div class="row" style="gap:6px"><span class="pill" style="border:1px solid ${SYM_VERDICTS.hit.color};color:${SYM_VERDICTS.hit.color}">${esc(u.name)}</span><span class="small muted">${u.short}×${u.long}mm</span><span class="spacer"></span><button class="btn sm" data-symedit="${u.id}">名前を直す</button><button class="btn sm ghost danger" data-symdel="${u.id}">消す</button></div>`).join('')}</div></div>` : '';
   return `${(d.dims && d.dims.length) ? '' : symScaleLine(d)}<div class="row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)"><b class="small">シンボルの判定（辞書）</b>
     ${['hit', 'near', 'unknown'].map(v => `<span class="pill" style="border:1px solid ${SYM_VERDICTS[v].color};color:${SYM_VERDICTS[v].color}">${SYM_VERDICTS[v].name} ${cnt[v]}</span>`).join('')}
-    <span class="small muted">器具は寸法、机・椅子は線の形から判定しています。行を押すと図面のその場所へ飛びます。色は図面の「符」ボタンで消せます</span></div>
+    <span class="small muted">器具は寸法だけの判定なので「類似」までにしています（寸法だけの確定は実測で正解率が低いため）。机・椅子は線の形から判定しています。行を押すと図面のその場所へ飛びます。色は図面の「符」ボタンで消せます</span></div>
     <div style="margin-top:8px;display:grid;gap:6px;max-height:320px;overflow:auto">${rows}${S.length > 150 ? `<div class="small muted">ほか ${S.length - 150} 件（先頭150件だけ出しています）</div>` : ''}</div>${mineHtml}`;
 }
 
@@ -1463,7 +1470,7 @@ function stepRooms(ctx) {
         if (cad) { try { p.drawing.symScale = estimateSymScale({ dimCheck, fixtures: allFixtures, clusters: p.drawing.furn || [] }); } catch (e2) { console.warn('シンボルの大きさの推定に失敗', e2); } }
         /* 新しい読み取り（js/reader2）：図枠・表の印を作って覚えておく。今の読み取りの結果（区画・器具）は変えない。画面に出すのは「新しい読み取り」を選んだ時だけ */
         /* 解析を後で作り直せるように、文字・長い線・ドアを覚えておく（解析の作りを直した時、開いただけで新しい解析になる） */
-        if (cad) p.drawing.src2 = { texts: res.texts || [], segs: res.longSegs && res.longSegs.length ? res.longSegs : [], doors: res.doorList || [] };
+        if (cad) p.drawing.src2 = { texts: res.texts || [], rawTexts: res.rawTexts || null, segs: res.longSegs && res.longSegs.length ? res.longSegs : [], doors: res.doorList || [] };
         if (cad) { try { p.drawing.analysis = analyzeFrame({ segs: res.longSegs && res.longSegs.length ? res.longSegs : res.plan.segs, faces: res.plan.faces, texts: res.texts || [], fixtures: allFixtures, doors: res.doorList || [] }); } catch (e2) { console.warn('新しい読み取りの解析に失敗', e2); } }
         /* ゾーン分けは解析の後（表・表題欄・図枠と確定した区画を候補に入れないため、印を渡す） */
         if (cad) { try { p.drawing.zones = computeZones({ segs: res.plan.segs || [], faces: res.plan.faces || [], texts: res.texts || [], doors: res.doorList || [], marks: (p.drawing.analysis && p.drawing.analysis.marks) || null, fixtures: allFixtures }).map(z => ({ id: uid('z'), fixed: false, ...z })); } catch (e2) { console.warn('ゾーン分けに失敗', e2); p.drawing.zones = []; } }

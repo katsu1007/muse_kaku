@@ -104,6 +104,33 @@ test('自分の辞書：壊れた登録は無視する', () => {
   assert.equal(r.mine, undefined);
 });
 
+import { classifyFixtureDisplay } from '../js/symdict.js';
+
+test('表示用判定（sw.46）：器具の寸法のみの確定は「類似」に落とし、生判定は rawVerdict に残す', () => {
+  const r = classifyFixtureDisplay([0, 0, 0.37, 0.42]);
+  assert.equal(r.verdict, 'near');
+  assert.equal(r.rawVerdict, 'hit');
+  assert.equal(r.capped, true);
+  assert.equal(r.category, '小便器');
+  /* 生の classifyBox は従来どおり hit（タイプ補正などが使う） */
+  assert.equal(classifyBox([0, 0, 0.37, 0.42]).verdict, 'hit');
+});
+
+test('表示用判定（sw.46）：自分の辞書の確定は落とさない／類似・不明はそのまま', () => {
+  const mine = [{ id: 'u1', name: '作業台', short: 900, long: 2000 }];
+  const m = classifyFixtureDisplay([0, 0, 2.0, 0.9], mine);
+  assert.equal(m.verdict, 'hit');
+  assert.equal(m.rawVerdict, 'hit');
+  assert.equal(m.capped, undefined);
+  const n = classifyFixtureDisplay([0, 0, 0.398, 0.497]);
+  assert.equal(n.verdict, 'near');
+  assert.equal(n.rawVerdict, 'near');
+  assert.equal(n.capped, undefined);
+  const u = classifyFixtureDisplay([0, 0, 2.0, 0.9]);
+  assert.equal(u.verdict, 'unknown');
+  assert.equal(u.rawVerdict, 'unknown');
+});
+
 test('CC0実測：浴槽（750×1700・円弧0.25・内側の閉曲線あり）は浴槽', () => {
   const r = classifySymbol({ short: 750, long: 1700, arcShare: 0.25, closed: true, innerClosed: true, dividers: null });
   assert.equal(r.result, '浴槽');

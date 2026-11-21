@@ -2,6 +2,7 @@
  * 前のKAKU（old/）の読み取りの部分を、画面に出さずに裏で動かして結果だけもらう。
  * 読み取りの精度を変えないため、前のKAKUのコードには手を入れない（テスト図面22枚と実図面で同じ結果になることを確かめてある）。
  * 前のKAKUの保存場所には、作業用の案件と図面を残さない（読み終わったら消す）。 */
+import { stitchTexts } from './textstitch.js';
 
 let readerPromise = null;
 export function getReader() {
@@ -159,6 +160,15 @@ export async function readWithFixtures(file, opt = {}) {
           }
         }
       } catch (e) { console.warn('区画の探し直しに失敗', e); }
+    }
+    /* DXF の文字つなぎ：言葉を1文字ずつ描く DXF では、読み取りの文字がバラバラのまま渡ってくる
+     * （部屋名が判定の材料にならない）。ここでだけ単語に戻し、元の並びは rawTexts に残す。
+     * JWW の文字は最初から言葉になっているので触らない。つなぎ方は js/textstitch.js（自前実装） */
+    if (/\.dxf$/i.test(file.name || '') && out.texts && out.texts.length) {
+      try {
+        const st = stitchTexts(out.texts);
+        if (st.parts) { out.rawTexts = out.texts; out.texts = st.texts; out.stitch = { joined: st.joined, parts: st.parts }; }
+      } catch (e) { console.warn('文字のつなぎに失敗', e); }
     }
     return out;
   } finally {
