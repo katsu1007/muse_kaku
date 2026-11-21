@@ -80,6 +80,18 @@ export async function readWithFixtures(file, opt = {}) {
       const E = W.document.getElementById('engineFrame').contentWindow;
       out.longSegs = JSON.parse(E.eval(`(()=>{const M=rgM(),o=[];RG.segs.forEach(s=>{const a=KAKU_rerot([s[1]*M,s[2]*M],M),b=KAKU_rerot([s[3]*M,s[4]*M],M),dx=Math.abs(b[0]-a[0]),dy=Math.abs(b[1]-a[1]);if(Math.max(dx,dy)<1||Math.min(dx,dy)>0.01)return;o.push([a[0],a[1],b[0],b[1]].map(v=>Math.round(v*1000)/1000))});return JSON.stringify(o.slice(0,60000))})()`));
     } catch (e) { out.longSegs = []; }
+    /* 器具の形の材料：線のグループのON/OFFに関係なく、図面の線を全部もらう。
+     * 器具のレイヤーは区画探しのグループから外れていることがあり（点線名でもない
+     * グループは plan.segs にも plan.dsegs にも残らない）、plan の線だけでは器具の
+     * 輪郭が無い図面がある（ジェイテクト高等学園がそうだった）。ハッチングの線は
+     * 形ではないので除く。使うのは js/fixshape.js の特徴取り出しだけで、線そのものは
+     * 案件に覚えない（特徴だけを器具に付け足す）。多すぎる図面では無しにして、
+     * 呼び出し側は plan の線で代用する */
+    try {
+      const E = W.document.getElementById('engineFrame').contentWindow;
+      const allS = JSON.parse(E.eval(`(()=>{if(!RG||!RG.segs)return'null';const M=rgM(),q=v=>Math.round(v*1000)/1000,o=[];RG.segs.forEach((s,i)=>{if(RG.autoHatch&&RG.hatch&&RG.hatch.has(i))return;const a=KAKU_rerot([s[1]*M,s[2]*M],M),b=KAKU_rerot([s[3]*M,s[4]*M],M);o.push([q(a[0]),q(a[1]),q(b[0]),q(b[1])])});return JSON.stringify(o)})()`));
+      if (Array.isArray(allS) && allS.length && allS.length <= 150000) out.allSegs = allS;
+    } catch (e) { console.warn('器具の形の材料を取れませんでした', e); }
     /* 器具の救済の材料：壁のレイヤー（長い直線が長さの6割以上）なのに扉の円弧もあるレイヤーは、壁も器具も同じレイヤーに描く図面の物。
      * 読み取り（KF_build）は壁のレイヤーを丸ごと外すので、そのレイヤーの器具が消えてしまう。ここでは材料（そのレイヤーの図形と
      * レイヤーの役割）だけをもらって、器具の判定はアプリ側（js/fixrescue.js）に任せる。取れなくても読み込みは続ける */

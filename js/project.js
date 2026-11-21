@@ -14,6 +14,7 @@ import { classifyFixtureDisplay, classifyCluster, buildChairContexts, SYM_VERDIC
 import { detectFurniture } from './furndetect.js';
 import { rescueFixtures, mergeFixtures } from './fixrescue.js';
 import { applyEdgeFix, revertEdgeFix } from './facerepair.js';
+import { createShapeIndex } from './fixshape.js';
 import { judgeRooms, ROOM_JUDGE } from './roomjudge.js';
 import { computeZones, splitFacesByLine, detectTableAreas } from './zones.js';
 import { supplementFaces, polygonizeFaces } from './polygonize.js';
@@ -406,7 +407,8 @@ function openSymEditor(entry, onDone) {
   setTimeout(() => { try { input.focus(); } catch (e) { /* そのまま */ } }, 60);
 }
 
-/* 拾った器具をシンボル辞書で判定し直した結果（器具は外形の寸法だけの判定。
+/* 拾った器具をシンボル辞書で判定し直した結果（基本は外形の寸法だけの判定。
+ * 輪郭の形の特徴が取れた器具は、決着した物だけ形の判定も使う＝sw.49）。
  * 机・椅子などの家具は、線の集まりから切り出した候補（d.furn）を形の特徴で判定し、検出・類似だけを足す。
  * 結果は図面ごとに覚える） */
 const symCache = new WeakMap();
@@ -421,12 +423,27 @@ function symList(d) {
   /* 寸法の自動補正（js/symscale.js）：図面の証拠から推定した倍率。辞書の寸法判定だけに効かせる */
   const ss = symScaleFor(d);
   const scale = (ss && ss.factor > 0) ? ss.factor : 1;
+  const plan = (d && d.plan) || null;
   const c = symCache.get(d);
-  if (c && c.from === fx && c.fu === fu && c.ver === symVer && c.zsig === zsig && c.faces === faces && c.src2 === src2 && c.ss === ss) return c.list;
+  if (c && c.from === fx && c.fu === fu && c.ver === symVer && c.zsig === zsig && c.faces === faces && c.src2 === src2 && c.ss === ss && c.plan === plan) return c.list;
   const mine = userSyms();
+  /* 器具の形の特徴：読み込み時に付け足した物（x.sf）を使う。無い図面（この機能より
+   * 前に保存した案件）は plan の線からその場で取り出す。器具のレイヤーがグループから
+   * 外れている図面では plan の線に輪郭が無いので、その場合は特徴なし（従来どおり
+   * 寸法だけの表示）になる。利用者が直した器具には形の判定を使わない */
+  let lazyIdx = null;
+  const featOf = x => {
+    if (!x || x.edited || !x.b) return null;
+    if (x.sf) return x.sf;
+    if (!plan || !(plan.segs || []).length) return null;
+    if (!lazyIdx) lazyIdx = createShapeIndex([...(plan.segs || []), ...(plan.dsegs || [])]);
+    try { return lazyIdx.featuresFor(x.b); } catch (e) { return null; }
+  };
   /* 器具の表示判定は classifyFixtureDisplay：寸法だけが根拠の器具の確定は表示では
-   * 「類似」までに落とす（sw.46）。生の判定は rawVerdict に残り、タイプ補正が使う */
-  const list = fx.map((x, k) => ({ k, b: x && x.b, t: x && x.t, ...(x && x.b ? classifyFixtureDisplay(x.b, mine, scale) : { verdict: 'unknown', category: null, score: 0, short: 0, long: 0 }) })).filter(s => s.b);
+   * 「類似」までに落とす（sw.46）。生の判定は rawVerdict に残り、タイプ補正が使う。
+   * 形の特徴が決着した物（オフィス什器＝sw.49、タンク帯の裏付けが取れた便器＝
+   * sw.50）だけ、形の「検出」にする */
+  const list = fx.map((x, k) => ({ k, b: x && x.b, t: x && x.t, ...(x && x.b ? classifyFixtureDisplay(x.b, mine, scale, featOf(x)) : { verdict: 'unknown', category: null, score: 0, short: 0, long: 0 }) })).filter(s => s.b);
   const baseFu = fu.map(x => (x && x.b) ? classifyCluster(x, mine, null, scale) : null);
   let ctxs = [];
   try { ctxs = buildChairContexts(fu, baseFu, { zones: d.zones || [], faces, fixtures: fx, texts: (src2 && src2.texts) || [] }, scale); } catch (e) { ctxs = []; }
@@ -436,7 +453,7 @@ function symList(d) {
     if (!r || r.verdict === 'unknown') return; /* 家具の候補は「不明」を並べない（線の集まりは数が多く、判定できた物だけ出す） */
     list.push({ k: 10000 + j, b: x.b, t: null, furn: true, ...r });
   });
-  symCache.set(d, { from: fx, fu, ver: symVer, zsig, faces, src2, ss, list });
+  symCache.set(d, { from: fx, fu, ver: symVer, zsig, faces, src2, ss, plan, list });
   return list;
 }
 /* 器具のタイプ補正（js/typefix.js）：保存してある器具の種類は変えず、辞書の判定と
@@ -453,8 +470,10 @@ function typeFixMap(d) {
   const c = tfCache.get(d);
   if (c && c.S === S && c.tsig === tsig && c.zsig === zsig && c.psegs === ((d.plan && d.plan.segs) || null)) return c.map;
   const byK = new Map(S.filter(s => !s.furn).map(s => [s.k, s]));
-  /* タイプ補正には表示用に落とす前の生の判定（rawVerdict）を渡す（sw.46） */
-  const verdicts = fx.map((x, k) => { const s = byK.get(k); return s ? { verdict: s.rawVerdict || s.verdict, category: s.category, score: s.score, sizeVeto: s.sizeVeto || null } : null; });
+  /* タイプ補正には表示用に落とす前の生の判定（rawVerdict）を渡す（sw.46）。
+   * カテゴリ・スコア・寸法制限も、形の表示判定（sw.49）に替わる前の寸法だけの
+   * 生判定（boxCat・boxScore・boxVeto）を渡す。タイプ補正の入力は従来と同一に保つ */
+  const verdicts = fx.map((x, k) => { const s = byK.get(k); return s ? { verdict: s.rawVerdict || s.verdict, category: s.boxCat !== undefined ? s.boxCat : s.category, score: s.boxScore != null ? s.boxScore : s.score, sizeVeto: s.boxVeto !== undefined ? s.boxVeto : (s.sizeVeto || null) } : null; });
   const ss = symScaleFor(d);
   const scale = (ss && ss.factor > 0) ? ss.factor : 1;
   /* 幾何チェック（sw.45・46）の材料：面と線は、要る器具がある図面でだけ用意する。
@@ -490,12 +509,12 @@ function symSummary(d, selK = -1) {
   const tfSpan = s => { if (s.furn) return ''; const tf = TF[s.k]; if (!tf) return '';
     if (tf.shown) return `<span style="color:var(--warn)">（タイプ補正：${esc(FIX_NAMES[tf.shown] || tf.shown)}として表示。${esc(tf.reason)}）</span>`;
     if (tf.confirm) return `<span style="color:var(--warn)">（要確認：${esc(tf.reason)}）</span>`; return ''; };
-  const rows = S.slice(0, 150).map(s => `<div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn sm" data-sym="${s.k}" style="justify-content:flex-start;gap:8px;min-height:40px;flex:1;text-align:left${s.k === selK ? ';border-color:var(--accent);background:rgba(255,138,61,.10)' : ''}"><span style="width:12px;height:12px;border-radius:3px;background:${SYM_VERDICTS[s.verdict].color};flex:none"></span><b>${esc(label(s))}</b><span class="muted">${Math.round(s.short)}×${Math.round(s.long)}mm</span>${s.furn ? '<span class="muted">（線から検出）</span>' : ''}${s.capped ? '<span class="muted">（寸法のみの判定）</span>' : ''}${s.context ? '<span class="muted">（文脈で確定）</span>' : ''}${s.mine ? '<span class="muted">（自分の辞書）</span>' : s.t && FIX_NAMES[s.t] ? `<span class="muted">（今の判定：${esc(FIX_NAMES[s.t])}）</span>` : ''}${tfSpan(s)}</button><button class="btn sm" data-symreg="${s.k}" style="min-height:40px;flex:none">${s.mine ? '直す' : 'これは何？'}</button></div>`).join('');
+  const rows = S.slice(0, 150).map(s => `<div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn sm" data-sym="${s.k}" style="justify-content:flex-start;gap:8px;min-height:40px;flex:1;text-align:left${s.k === selK ? ';border-color:var(--accent);background:rgba(255,138,61,.10)' : ''}"><span style="width:12px;height:12px;border-radius:3px;background:${SYM_VERDICTS[s.verdict].color};flex:none"></span><b>${esc(label(s))}</b><span class="muted">${Math.round(s.short)}×${Math.round(s.long)}mm</span>${s.furn ? '<span class="muted">（線から検出）</span>' : ''}${s.capped ? '<span class="muted">（寸法のみの判定）</span>' : ''}${s.tankBand != null ? '<span class="muted">（形とタンク帯で判定）</span>' : s.shapeBased ? '<span class="muted">（形で判定）</span>' : ''}${s.context ? '<span class="muted">（文脈で確定）</span>' : ''}${s.mine ? '<span class="muted">（自分の辞書）</span>' : s.t && FIX_NAMES[s.t] ? `<span class="muted">（今の判定：${esc(FIX_NAMES[s.t])}）</span>` : ''}${tfSpan(s)}</button><button class="btn sm" data-symreg="${s.k}" style="min-height:40px;flex:none">${s.mine ? '直す' : 'これは何？'}</button></div>`).join('');
   const mine = userSyms();
   const mineHtml = mine.length ? `<div style="margin-top:10px"><b class="small">自分の辞書（${mine.length}件）</b><div style="display:grid;gap:6px;margin-top:6px">${mine.map(u => `<div class="row" style="gap:6px"><span class="pill" style="border:1px solid ${SYM_VERDICTS.hit.color};color:${SYM_VERDICTS.hit.color}">${esc(u.name)}</span><span class="small muted">${u.short}×${u.long}mm</span><span class="spacer"></span><button class="btn sm" data-symedit="${u.id}">名前を直す</button><button class="btn sm ghost danger" data-symdel="${u.id}">消す</button></div>`).join('')}</div></div>` : '';
   return `${(d.dims && d.dims.length) ? '' : symScaleLine(d)}<div class="row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)"><b class="small">シンボルの判定（辞書）</b>
     ${['hit', 'near', 'unknown'].map(v => `<span class="pill" style="border:1px solid ${SYM_VERDICTS[v].color};color:${SYM_VERDICTS[v].color}">${SYM_VERDICTS[v].name} ${cnt[v]}</span>`).join('')}
-    <span class="small muted">器具は寸法だけの判定なので「類似」までにしています（寸法だけの確定は実測で正解率が低いため）。机・椅子は線の形から判定しています。行を押すと図面のその場所へ飛びます。色は図面の「符」ボタンで消せます</span></div>
+    <span class="small muted">器具は寸法だけの判定では「類似」までにしています（寸法だけの確定は実測で正解率が低いため）。器具の輪郭の形が読み取れて、机・椅子と決着した物と、タンク帯の裏付けが取れた便器だけ「検出」にしています。机・椅子などの家具は線の形から判定しています。行を押すと図面のその場所へ飛びます。色は図面の「符」ボタンで消せます</span></div>
     <div style="margin-top:8px;display:grid;gap:6px;max-height:320px;overflow:auto">${rows}${S.length > 150 ? `<div class="small muted">ほか ${S.length - 150} 件（先頭150件だけ出しています）</div>` : ''}</div>${mineHtml}`;
 }
 
@@ -1464,6 +1483,14 @@ function stepRooms(ctx) {
             if (rescued.length) { allFixtures = mergeFixtures(res.fixtures || [], rescued); p.drawing.fixtures = allFixtures; }
           } catch (e2) { console.warn('器具の救済に失敗', e2); }
         }
+        /* 器具の形の特徴：輪郭の線（グループのON/OFFに関係ない全線。取れなければ plan の線）
+         * から特徴だけを取り出して器具に付け足す（sf）。使うのは表示の辞書判定だけで、
+         * 器具の種類・見積は変えない。線そのものは案件に覚えない */
+        if (cad) { try {
+          const pool = (res.allSegs && res.allSegs.length) ? res.allSegs : [...(res.plan.segs || []), ...(res.plan.dsegs || [])];
+          const sidx = createShapeIndex(pool);
+          allFixtures.forEach(x => { if (!x || !x.b) return; const f = sidx.featuresFor(x.b); if (f) x.sf = { short: f.short, long: f.long, arcShare: f.arcShare, closed: f.closed, innerClosed: f.innerClosed, dividers: f.dividers, tankBand: f.tankBand != null ? f.tankBand : null }; });
+        } catch (e2) { console.warn('器具の形の取り出しに失敗', e2); } }
         /* 机・椅子などの家具：線の集まりから形の候補を切り出して覚える（判定はシンボル辞書。器具・見積の数字は変えない） */
         if (cad) { try { p.drawing.furn = detectFurniture(res.plan.segs || [], allFixtures, res.doorList || []); } catch (e2) { console.warn('家具の検出に失敗', e2); p.drawing.furn = []; } }
         /* シンボルの大きさの自動補正：寸法の答え合わせと、拾った器具・家具の候補から倍率を推定して覚える。

@@ -3347,11 +3347,81 @@ export function classifyBox(b, userDict = [], scale = 1) {
  * 表示では器具の hit を「類似（要確認）」までに落とし、確定とは出さない。
  * ただし生の判定は rawVerdict に残し、タイプ補正（js/typefix.js）はそちらを使う
  * （補正側は寸法以外の裏付けと組み合わせて判断するため）。
- * 自分の辞書（mine）の hit は利用者本人が教えた判定なので落とさない */
-export function classifyFixtureDisplay(b, userDict = [], scale = 1) {
+ * 自分の辞書（mine）の hit は利用者本人が教えた判定なので落とさない。
+ *
+ * sw.49：feat（任意）＝ js/fixshape.js が器具の輪郭の線から取り出した形の特徴。
+ * 形の判定が決着（スコア0.90以上・2位との差0.05以上＝classifySymbol の確定条件）
+ * し、カテゴリが「オフィス什器」の時だけ、表示を形の「検出」にする（shapeBased）。
+ * 範囲をオフィス什器に限るのは 2026-11-22 の5図面実測による：形の確定は
+ * 机・デスクで 7/7 正解だった一方、衛生器具・設備では 0/5（便器と流し・SKの
+ * ダブルボウルは平面の形と寸法がほぼ同じで、肘掛け椅子はキッチンのパターンに
+ * 化ける。衛生器具の形の1位は僅差の物が大半で、確定の物差しでは決着しない）。
+ * 形が決着しない・対象外のカテゴリの時は、従来の表示と完全に同じにする。
+ * sw.50：タンク帯の証拠で決着した便器（classifyFixtureShape が tankBand を
+ * 付けて返した hit）も、形の「検出」にする。帯の証拠が無い衛生器具は
+ * 従来どおり確定しない（classifyFixtureShape の注記に実測の境界）。
+ * タイプ補正へ渡す材料は従来のまま壊さないよう、寸法だけの生判定を
+ * rawVerdict（段位）・boxCat・boxScore・boxVeto（カテゴリ・スコア・寸法制限）に
+ * 常に残す（typefix 側はそちらを読む） */
+const SYM_KIND_OF = new Map(SYM_DICT.map(e => [e.category, e.kind]));
+const SHAPE_DISPLAY_KINDS = new Set(['オフィス什器']);
+
+/* 器具の形の特徴を辞書で判定する。家具クラスタの classifyCluster と違い、
+ * innerClosed（ボウルの閉曲線の有無）もゲートに渡す（辞書のパターンが
+ * 小便器と便器・洗面器の切り分けに使うため）。自分の辞書は寸法の照合
+ * （classifyBox）側で先に見るので、ここでは組み込みの辞書だけを使う。
+ * 戻り値は classifyBox と同じ形。特徴が無ければ null
+ *
+ * sw.50 タンク帯の証拠（feat.tankBand、js/fixshape.js が器具本体の線だけで測定）：
+ * 便器の形は流し・SK のダブルボウル実測パターンとほぼ一致し、形だけでは
+ * 「SK 0.978 対 便器 0.931」の僅差で決着しない（高等学園の便器18件）。
+ * そこで「タンク帯がある」ことを便器確定の必要条件とし、帯がある時だけ
+ * 流し・SK を候補から外して便器で決着するかを見る（外した後の順位でも
+ * スコア0.90以上・2位との差0.05以上・寸法制限なし、を全て満たす時だけ確定。
+ * 判定は classifySymbol がそのまま行う）。ボウル（innerClosed）も必須。
+ * 実測の境界（2026-11-22、5図面・~/workspace/kaku/work/tankband/）：
+ * - 発火は高等学園の便器18件のみ、全件正解。便器は18/18が帯ありだった。
+ * - 小便器はこの経路では確定しない。帯の有無は小便器を分離しない（実測で
+ *   小便器19件中18件が「帯あり」：シンボルの中心線や背面の線が帯状に読める
+ *   ため）ので、「帯なし→小便器」の判定は入れていない。
+ * - 洗面器は候補から外さない。洗面器との僅差（0.034〜0.049）が残る物
+ *   （高等学園の小便器、三井屋の洗面器・手洗い）は従来どおり類似のまま。
+ * - 帯が無い・測れない（tankBand が true でない）時はこの経路は使わず、
+ *   形の判定は従来どおり（衛生器具は表示で確定しない）。 */
+export function classifyFixtureShape(feat, scale = 1) {
+  if (!feat || !(feat.short > 0) || !(feat.long > 0)) return null;
+  const f = {
+    short: feat.short, long: feat.long,
+    arcShare: feat.arcShare != null ? feat.arcShare : null,
+    closed: feat.closed != null ? feat.closed : null,
+    innerClosed: feat.innerClosed != null ? feat.innerClosed : null,
+    dividers: feat.dividers != null ? feat.dividers : null,
+  };
+  if (feat.tankBand === true && feat.innerClosed === true) {
+    const ev = classifySymbol(f, scale, { exclude: ['流し・SK'] });
+    if (ev.result === '洋式大便器')
+      return { verdict: 'hit', category: '洋式大便器', score: ev.score, second: ev.second, secondScore: ev.secondScore, chairScore: ev.chairScore, tankBand: true };
+  }
+  const r = classifySymbol(f, scale);
+  if (r.result === '不明') return { verdict: 'unknown', category: null, score: r.score, second: r.second, secondScore: r.secondScore, chairScore: r.chairScore };
+  if (r.result === '要確認') return { verdict: 'near', category: r.category, score: r.score, second: r.second, secondScore: r.secondScore, chairScore: r.chairScore, sizeVeto: r.sizeVeto };
+  return { verdict: 'hit', category: r.result, score: r.score, second: r.second, secondScore: r.secondScore, chairScore: r.chairScore };
+}
+
+export function classifyFixtureDisplay(b, userDict = [], scale = 1, feat = null) {
   const r = classifyBox(b, userDict, scale);
-  if (r.verdict !== 'hit' || r.mine) return { ...r, rawVerdict: r.verdict };
-  return { ...r, verdict: 'near', rawVerdict: 'hit', capped: true };
+  const base = { ...r, rawVerdict: r.verdict, boxCat: r.category, boxScore: r.score, boxVeto: r.sizeVeto || null };
+  if (r.mine) return base;
+  if (feat) {
+    const s = classifyFixtureShape(feat, scale);
+    /* 形の「検出」にするのは、オフィス什器で決着した物と、タンク帯の証拠で
+     * 決着した便器（s.tankBand が付いた物）だけ */
+    if (s && s.verdict === 'hit' && (SHAPE_DISPLAY_KINDS.has(SYM_KIND_OF.get(s.category)) || s.tankBand != null)) {
+      return { ...base, verdict: 'hit', category: s.category, score: s.score, second: s.second, secondScore: s.secondScore, chairScore: s.chairScore, sizeVeto: null, shapeBased: true, ...(s.tankBand != null ? { tankBand: s.tankBand } : {}) };
+    }
+  }
+  if (r.verdict !== 'hit') return base;
+  return { ...base, verdict: 'near', capped: true };
 }
 
 /* 線の集まりから切り出した形（js/furndetect.js の候補）を判定する。
@@ -3539,8 +3609,12 @@ export function buildChairContexts(clusters, base, env = {}, scale = 1) {
  *   図面の座標が実寸の scale 倍で描かれている時、寸法がらみの判定（パターンの寸法照合と
  *   sizeVeto の寸法帯）だけを実寸（short/long ÷ scale）で行う。形の特徴（円弧の割合・
  *   閉じ具合・分割線）と縦横比は縮尺で変わらないので、そのまま使う。
- *   scale が 1 の時は従来と完全に同じ結果になる。 */
-export function classifySymbol(f, scale = 1) {
+ *   scale が 1 の時は従来と完全に同じ結果になる。
+ * opts（任意、sw.50）：{ exclude: [カテゴリ名] } を渡すと、そのカテゴリを候補から
+ *   外して順位付けする。使うのは器具の形判定のタンク帯経路（classifyFixtureShape）
+ *   だけで、寸法判定（classifyBox）・家具クラスタ（classifyCluster）は渡さない
+ *   （＝従来と完全に同じ）。 */
+export function classifySymbol(f, scale = 1, opts = null) {
   const sc = (typeof scale === 'number' && Number.isFinite(scale) && scale > 0) ? scale : 1;
   const ff = (sc === 1 || !f || !(f.short > 0) || !(f.long > 0)) ? f : { ...f, short: f.short / sc, long: f.long / sc };
   /* まずカテゴリごとの最良スコアに集約する（同じカテゴリのパターン同士は競合しない。
@@ -3552,6 +3626,7 @@ export function classifySymbol(f, scale = 1) {
     const cur = byCat.get(e.category);
     if (!cur || s > cur.score) byCat.set(e.category, { score: s, category: e.category, kind: e.kind, label: p.label || p.origin });
   }
+  if (opts && opts.exclude) for (const c of opts.exclude) byCat.delete(c);
   const hits = [...byCat.values()];
   hits.sort((a, b) => b.score - a.score);
   const extra = {
