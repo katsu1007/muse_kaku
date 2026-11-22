@@ -388,3 +388,140 @@ test('和式便器：細長い楕円（275×655・曲線が多い）は線のか
   const b = classifyBox([0, 0, 0.655, 0.275]);
   assert.notStrictEqual(b.category, '和式便器');
 });
+
+/* 素の四角ガード（試行・2026-11-22 tagtrial）：物ではない物（仕上表のセル等）が
+ * 素の四角形だけで家具として検出になるのを、表示だけ類似に落とす。
+ * 期待値は正しさの物差し（sw.51 時点）の実測：対象 39 件中 30 件を覆い、正解の家具には当たらない署名 */
+import { bareClusterFlags, BARE_MAX_SEGS, BARE_MAX_ARC } from '../js/symdict.js';
+
+/* 仕上表のセルと同型（450×900・直線のみ・線4本・単独・文字なし） */
+const cellCand = (x, y) => ({ b: [x, y, x + 0.45, y + 0.9], short: 450, long: 900, arcShare: 0, closed: true, dividers: 0, n: 4 });
+
+test('素の四角ガード：単独の素の四角（仕上表セル型）は該当になる', () => {
+  assert.deepEqual(bareClusterFlags([cellCand(0, 0)], []), [true]);
+});
+
+test('素の四角ガード：辺を接して並ぶ四角（机の列・島）は該当にならない', () => {
+  const pair = [cellCand(0, 0), cellCand(0.45, 0)];
+  assert.deepEqual(bareClusterFlags(pair, []), [false, false]);
+});
+
+test('素の四角ガード：円弧のある形・線の多い形は該当にならない', () => {
+  assert.deepEqual(bareClusterFlags([{ ...cellCand(0, 0), arcShare: 0.5 }], []), [false]);
+  assert.deepEqual(bareClusterFlags([{ ...cellCand(0, 0), n: BARE_MAX_SEGS + 6 }], []), [false]);
+  assert.ok(BARE_MAX_ARC < 0.1);
+});
+
+test('素の四角ガード：外形の中に文字がある実在の什器は該当にならない', () => {
+  const f = cellCand(0, 0);
+  assert.deepEqual(bareClusterFlags([f], [{ t: '収納', x: 0.2, y: 0.4 }]), [false]);
+  assert.deepEqual(bareClusterFlags([f], [{ t: '室名', x: 3, y: 3 }]), [true]);
+});
+
+test('素の四角ガード：検出は類似に落ち、生の判定は rawVerdict に残る', () => {
+  const f = cellCand(0, 0);
+  const plain = classifyCluster(f, []);
+  assert.equal(plain.verdict, 'hit');
+  assert.equal(plain.category, '収納（棚・キャビネット）');
+  const g = classifyCluster(f, [], null, 1, true);
+  assert.equal(g.verdict, 'near');
+  assert.equal(g.capped, true);
+  assert.equal(g.rawVerdict, 'hit');
+  assert.equal(g.category, plain.category);
+  assert.equal(g.score, plain.score);
+});
+
+test('素の四角ガード：自分の辞書の検出は落とさない／ガードなしは従来と同一', () => {
+  const f = cellCand(0, 0);
+  const mine = classifyCluster(f, [{ name: 'マイ収納', short: 450, long: 900 }], null, 1, true);
+  assert.equal(mine.verdict, 'hit');
+  assert.equal(mine.mine, true);
+  assert.deepEqual(classifyCluster(f, [], null, 1, false), classifyCluster(f, []));
+});
+
+/* 抽出強化ステップ1（2026-11-22、~/workspace/kaku/work/extstep1/）：物ではない物の除外。
+ * 期待値は EXTRACTION_STEP1_TRIAL.md の実測そのもの：解消した非対象の代表例では該当になり、
+ * 緩い素の四角が誤射した実物7件＋過大取り込みの洗面台1件では該当にならないこと。
+ * 特徴量は trial の data.json の実測値（寸法mm・線数・円弧率・仕切り線・箱内の文字） */
+import { nonObjectFlags, nonObjectSignature, titleRegionFlags } from '../js/symdict.js';
+
+const exCand = (w, h, feats = {}) => ({ b: [0, 0, w / 1000, h / 1000], short: Math.min(w, h), long: Math.max(w, h), arcShare: 0, closed: true, dividers: 0, n: 4, ...feats });
+
+test('除外B1″：仕上表セル型の素の四角（450×900・線6本）は該当になる', () => {
+  assert.deepEqual(nonObjectFlags([exCand(450, 900, { n: 6 })], []), [true]);
+  assert.deepEqual(nonObjectFlags([exCand(450, 900, { n: 4 })], []), [true]);
+  assert.equal(nonObjectSignature({ n: 6, arcShare: 0, dividers: 0 },
+    { short: 450, long: 900, aspect: 2, textsIn: 0, numTextIn: 0, numTextNear: 0, matIn: 0, edgeNeighbours: 0 }), 'bare2');
+});
+
+test('除外B3″：柱状の単独四角（347×385・円弧0.07）は bare2 でなく column で該当になる', () => {
+  const f = exCand(347, 385, { n: 6, arcShare: 0.07 });
+  assert.deepEqual(nonObjectFlags([f], []), [true]);
+  assert.equal(nonObjectSignature(f,
+    { short: 347, long: 385, aspect: 385 / 347, textsIn: 0, numTextIn: 0, numTextNear: 0, matIn: 0, edgeNeighbours: 0 }), 'column');
+});
+
+test('除外B2″：寸法線（986×6490・数字文字を内包／300×5171・数字文字が近傍）は該当になる', () => {
+  const f1 = exCand(986, 6490, { n: 9, dividers: 14 });
+  assert.deepEqual(nonObjectFlags([f1], [{ t: '6,350', x: 0.5, y: 3 }]), [true]);
+  const f2 = exCand(300, 5171, { n: 5 });
+  assert.deepEqual(nonObjectFlags([f2], [{ t: '1,200', x: 0.15, y: 5.35 }]), [true]);
+  /* 数字文字が無ければ寸法線とはしない */
+  assert.deepEqual(nonObjectFlags([exCand(300, 5171, { n: 5 })], []), [false]);
+});
+
+test('除外B8：仕上げ文字を2件以上含む表セル（955×2382）は該当になる', () => {
+  const f = exCand(955, 2382, { n: 4 });
+  const texts = [{ t: '壁：ｸﾛｽ', x: 0.4, y: 0.6 }, { t: '床：長尺', x: 0.4, y: 1.2 }, { t: '天井：ｸﾛｽ', x: 0.4, y: 1.8 }];
+  assert.deepEqual(nonObjectFlags([f], texts), [true]);
+  assert.equal(nonObjectSignature(f,
+    { short: 955, long: 2382, aspect: 2382 / 955, textsIn: 3, numTextIn: 0, numTextNear: 0, matIn: 3, edgeNeighbours: 0 }), 'finish');
+});
+
+test('除外B11：文字の多い細長い柱（1200×6965・箱内文字5件）は該当になる', () => {
+  const f = exCand(1200, 6965, { n: 6 });
+  const texts = ['（W1600）', '2', '席', '役職席', '16'].map((t, i) => ({ t, x: 0.6, y: 0.8 + i * 1.2 }));
+  assert.deepEqual(nonObjectFlags([f], texts), [true]);
+});
+
+test('除外の誤射防止：受付カウンター（1200×2567・線5本）は緩い素の四角には当たるが除外には当たらない', () => {
+  const f = exCand(1200, 2567, { n: 5 });
+  assert.deepEqual(bareClusterFlags([f], []), [true]); /* 弱体化（類似に落とす）では当たる */
+  assert.deepEqual(nonObjectFlags([f], []), [false]); /* 除外では長辺≤2000mm が守る */
+});
+
+test('除外の誤射防止：人物ピクト付き机（695×784・仕切り線99／671×737・仕切り線78）は当たらない', () => {
+  assert.deepEqual(nonObjectFlags([exCand(695, 784, { n: 4, dividers: 99 })], []), [false]);
+  assert.deepEqual(nonObjectFlags([exCand(671, 737, { n: 4, dividers: 78 })], []), [false]);
+});
+
+test('除外の誤射防止：303mm角の金物（303×303・仕切り線2）は当たらない', () => {
+  const f = exCand(303, 303, { n: 6, dividers: 2 });
+  assert.deepEqual(nonObjectFlags([f], []), [false]); /* B1″は仕切り線=0、B3″は短辺≥320mm が守る */
+});
+
+test('除外の誤射防止：過大取り込みの洗面台（1180×2982・円弧0.01）は当たらない', () => {
+  assert.deepEqual(nonObjectFlags([exCand(1180, 2982, { n: 5, arcShare: 0.01 })], []), [false]);
+});
+
+test('除外B1″：辺を接する隣（家具同士・器具の箱）は隣接として数え、該当にならない', () => {
+  const a = exCand(450, 900, { n: 6 });
+  const b = { ...exCand(450, 900, { n: 6 }), b: [0.45, 0, 0.9, 0.9] };
+  assert.deepEqual(nonObjectFlags([a, b], [], [a.b, b.b]), [false, false]);
+  const fxBox = [0.45, 0, 1.0, 0.9]; /* 器具の箱が横に接している場合も隣として数える */
+  assert.deepEqual(nonObjectFlags([a], [], [a.b, fxBox]), [false]);
+  assert.deepEqual(nonObjectFlags([a], [], [a.b]), [true]);
+});
+
+test('層A：表題欄の領域内にある器具（ロゴ型）は該当になる', () => {
+  const regions = [{ type: 'title', box: [-1, -1, 3, 3] }, { type: 'frame', box: [-2, -2, 9, 9] }];
+  assert.deepEqual(titleRegionFlags([[0, 0, 0.678, 1.377]], regions, [], {}), [true]);
+  assert.deepEqual(titleRegionFlags([[5, 5, 5.5, 6]], regions, [], {}), [false]);
+});
+
+test('層A：中心を含む区画のマークが out（title）の器具は該当、hold では該当にならない', () => {
+  const faces = [{ i: 7, poly: [[-1, -1], [3, -1], [3, 3], [-1, 3]] }];
+  assert.deepEqual(titleRegionFlags([[0, 0, 0.5, 0.5]], [], faces, { 7: { s: 'out', type: 'title' } }), [true]);
+  assert.deepEqual(titleRegionFlags([[0, 0, 0.5, 0.5]], [], faces, { 7: { s: 'hold', type: 'title' } }), [false]);
+  assert.deepEqual(titleRegionFlags([[0, 0, 0.5, 0.5]], [], [], {}), [false]);
+});

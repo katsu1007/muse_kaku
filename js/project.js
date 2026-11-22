@@ -10,7 +10,7 @@ import { SYS, MANY, sysOptions, rebuild, PIPE_LOSS } from './piping.js';
 import { importDrawing, groupGeom, roomHoles, planCH, orderFaces as orderFacesOf } from './drawing.js';
 import { readWithFixtures, oldFaceLights, roomOpenRuns, FIX_NAMES, FIX_ITEMS, FIX_WORDS } from './legacy.js';
 import { planView, roomColor } from './planview.js';
-import { classifyFixtureDisplay, classifyCluster, buildChairContexts, SYM_VERDICTS, SYM_DICT } from './symdict.js';
+import { classifyFixtureDisplay, classifyCluster, buildChairContexts, bareClusterFlags, nonObjectFlags, titleRegionFlags, SYM_VERDICTS, SYM_DICT } from './symdict.js';
 import { detectFurniture } from './furndetect.js';
 import { rescueFixtures, mergeFixtures } from './fixrescue.js';
 import { applyEdgeFix, revertEdgeFix } from './facerepair.js';
@@ -424,8 +424,10 @@ function symList(d) {
   const ss = symScaleFor(d);
   const scale = (ss && ss.factor > 0) ? ss.factor : 1;
   const plan = (d && d.plan) || null;
+  /* 抽出強化ステップ1・層Aの材料（reader2 の frame 解析）。無い図面では層Aは効かない */
+  const analysis = (d && d.analysis) || null;
   const c = symCache.get(d);
-  if (c && c.from === fx && c.fu === fu && c.ver === symVer && c.zsig === zsig && c.faces === faces && c.src2 === src2 && c.ss === ss && c.plan === plan) return c.list;
+  if (c && c.from === fx && c.fu === fu && c.ver === symVer && c.zsig === zsig && c.faces === faces && c.src2 === src2 && c.ss === ss && c.plan === plan && c.ana === analysis) return c.list;
   const mine = userSyms();
   /* 器具の形の特徴：読み込み時に付け足した物（x.sf）を使う。無い図面（この機能より
    * 前に保存した案件）は plan の線からその場で取り出す。器具のレイヤーがグループから
@@ -443,23 +445,42 @@ function symList(d) {
    * 「類似」までに落とす（sw.46）。生の判定は rawVerdict に残り、タイプ補正が使う。
    * 形の特徴が決着した物（オフィス什器＝sw.49、タンク帯の裏付けが取れた便器＝
    * sw.50）だけ、形の「検出」にする */
+  /* 抽出強化ステップ1・層A（2026-11-22、~/workspace/kaku/work/extstep1/）：表題欄・表の
+   * 領域の中にある器具は辞書の一覧に出さない。実測で当たるのは図面のロゴ6件だけで、
+   * 実器具には当たらない（EXTRACTION_STEP1_TRIAL.md）。器具そのもの（d.fixtures）と
+   * 見積には触らない。消えた器具はタイプ補正でも「辞書の判定なし」になる（従来、
+   * 一覧に無い器具と同じ扱い） */
+  const titleFlags = analysis ? titleRegionFlags(fx.map(x => x && x.b), analysis.regions || [], faces, analysis.marks || {}) : fx.map(() => false);
   const list = fx.map((x, k) => {
     const r = x && x.b ? classifyFixtureDisplay(x.b, mine, scale, featOf(x)) : { verdict: 'unknown', category: null, score: 0, short: 0, long: 0 };
     /* 器具の救済が線の形で和便器と決めた物（how:'jbowl'）は、寸法だけの辞書判定より形の判定を出す
      * （拾い方と符の表示を揃える。sw.51：kaku_generation の how の仕組みのうち和便器だけを取り込み） */
     if (x && x.how === 'jbowl' && !(r && r.mine)) return { k, b: x.b, t: x.t, ...r, verdict: 'hit', rawVerdict: 'hit', category: '和式便器', shape: 'jbowl', capped: false, sizeVeto: null };
     return { k, b: x && x.b, t: x && x.t, ...r };
-  }).filter(s => s.b);
-  const baseFu = fu.map(x => (x && x.b) ? classifyCluster(x, mine, null, scale) : null);
+  }).filter((s, k) => s.b && !titleFlags[k]);
+  /* 素の四角ガード（試行・2026-11-22 tagtrial）：仕上表のセル・柱など「物ではない物」が
+   * 素の四角形だけで家具として検出になるのを、表示だけ類似に落とす。材料はクラスタ全体と
+   * 文字から作る（js/symdict.js の bareClusterFlags。実測の根拠は同ファイルの注記） */
+  const bareFlags = bareClusterFlags(fu, (src2 && src2.texts) || []);
+  /* 抽出強化ステップ1・層B（2026-11-22、~/workspace/kaku/work/extstep1/）：物ではない物
+   * （仕上表のセル・柱・寸法線など）の署名に当たった家具クラスタは、辞書の一覧に
+   * 出さない（弱体化ではなく除外。署名と実測の根拠は js/symdict.js の nonObjectFlags）。
+   * 辺を接する隣は器具の箱も含めた全箱で数える（trial の測定条件と同じ）。
+   * 椅子の文脈判定の入力は従来どおり全クラスタのままにし、除外は一覧への追加時点
+   * だけで行う（残るクラスタの判定が動かないようにするため） */
+  const poolBoxes = [...fx.map(x => x && x.b), ...fu.map(x => x && x.b)].filter(Boolean);
+  const exclFlags = nonObjectFlags(fu, (src2 && src2.texts) || [], poolBoxes);
+  const baseFu = fu.map((x, j) => (x && x.b) ? classifyCluster(x, mine, null, scale, bareFlags[j]) : null);
   let ctxs = [];
   try { ctxs = buildChairContexts(fu, baseFu, { zones: d.zones || [], faces, fixtures: fx, texts: (src2 && src2.texts) || [] }, scale); } catch (e) { ctxs = []; }
   fu.forEach((x, j) => {
     if (!x || !x.b) return;
-    const r = ctxs[j] ? classifyCluster(x, mine, ctxs[j], scale) : baseFu[j];
+    if (exclFlags[j]) return; /* 層B：物ではない物は一覧に出さない */
+    const r = ctxs[j] ? classifyCluster(x, mine, ctxs[j], scale, bareFlags[j]) : baseFu[j];
     if (!r || r.verdict === 'unknown') return; /* 家具の候補は「不明」を並べない（線の集まりは数が多く、判定できた物だけ出す） */
     list.push({ k: 10000 + j, b: x.b, t: null, furn: true, ...r });
   });
-  symCache.set(d, { from: fx, fu, ver: symVer, zsig, faces, src2, ss, plan, list });
+  symCache.set(d, { from: fx, fu, ver: symVer, zsig, faces, src2, ss, plan, ana: analysis, list });
   return list;
 }
 /* 器具のタイプ補正（js/typefix.js）：保存してある器具の種類は変えず、辞書の判定と
