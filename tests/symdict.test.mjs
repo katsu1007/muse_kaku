@@ -381,3 +381,10 @@ test('ゾーン名の水回り降格は、大きな区画（複数室の混ざ�
   const rSmall = ctxFor(clusters, { faces: smallFaces, zones });
   assert.equal(rSmall[0].verdict, 'near');
 });
+
+test('和式便器：細長い楕円（275×655・曲線が多い）は線のかたまりなら和式便器、寸法だけでは当てない（2026-11-22）', () => {
+  const r = classifyCluster({ short: 275, long: 655, arcShare: 0.7, closed: true, dividers: null });
+  assert.strictEqual(r.category, '和式便器');
+  const b = classifyBox([0, 0, 0.655, 0.275]);
+  assert.notStrictEqual(b.category, '和式便器');
+});

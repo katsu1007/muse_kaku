@@ -149,6 +149,45 @@ export const SYM_DICT = [
   ]
  },
  {
+  "id": "wc-japanese",
+  "category": "和式便器",
+  "kind": "衛生器具",
+  "patterns": [
+   {
+    "origin": "rule",
+    "label": "和式（細長い楕円の鉢）",
+    "size_range_mm": {
+     "short": [
+      200,
+      360
+     ],
+     "long": [
+      500,
+      800
+     ]
+    },
+    "aspect_range": [
+     1.9,
+     3.5
+    ],
+    "primitives": {
+     "arc_share": [
+      0.5,
+      1
+     ],
+     "closed_outline": true,
+     "inner_closed": null,
+     "divider_min": null,
+     "straight_back": false
+    },
+    "needs_features": [
+     "arcShare"
+    ],
+    "notes": "寸法だけ（器具の外形の箱）では当てない：250×800 級の浅い箱（消火栓箱・浅型カウンター）と重なるため、曲線の割合が分かる候補（線のかたまり）にだけ当てる。器具の救済が形で和便器と決めた物は、符の表示で和式便器と出す（project.js の symList）。床に埋める和式の鉢。平面は細長い楕円（短い方20〜36cm・長い方50〜80cm・長さが幅の1.9倍以上）。隅付けのロータンク（三角・レバー付き）は鉢と別に描かれ、便器の一部なので数えない。2026-11-22 三井屋の現況図で、かつ（持ち主）が実物を確かめた（くらちゃん＝Claude が追加。寸法の帯は図面の形から測った値で、図形そのものは持たない）。洋式大便器の帯（幅350〜490）とは短い方が重ならない"
+   }
+  ]
+ },
+ {
   "id": "urinal",
   "category": "小便器",
   "kind": "衛生器具",
@@ -3486,7 +3525,7 @@ const CHAIR_FACE_WET_MAX = 15;   /* 区画内の文字で水回りと見る区�
 const ZONE_WET_FACE_MAX = 20;    /* ゾーン名で水回りと見る区画の大きさ上限（㎡） */
 const SAN_FIX_ANCHOR_MAX = 1.0;  /* 衛生の確認：便器・小便器の縁までの距離（m） */
 const SAN_TEXT_ANCHOR_MAX = 1.0; /* 衛生の確認：水回りの文字までの距離（m） */
-const SAN_CATS = new Set(['小便器', '洋式大便器', '洗面器', '流し・SK', '浴槽']);
+const SAN_CATS = new Set(['小便器', '洋式大便器', '和式便器', '洗面器', '流し・SK', '浴槽']);
 const WET_NAME_RE = /便|洗|湯|浴|トイレ|厠|WC/i;
 const OFFICE_NAME_RE = /事務|会議|応接|社長|役員|食堂|待合|休憩|ロビー|受付|打合|ミーティング|控室|談話|教室|研修|執務|講義|実習室|図書/;
 const SAN_TYPES = new Set(['toilet', 'urinal']);

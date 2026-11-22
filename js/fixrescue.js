@@ -94,9 +94,15 @@ function KF_build(ents, P, roles) {
     for (let i = GS.length - 1; i >= 0; i--) { const a = GS[i].b; const k = GS.findIndex((o, j) => j < i && o.g[0].ly === GS[i].g[0].ly && Math.max(o.b[2] - o.b[0], o.b[3] - o.b[1]) <= 3.6 && o.b[0] <= a[0] && o.b[1] <= a[1] && o.b[2] >= a[2] && o.b[3] >= a[3]); if (k >= 0) { GS[k].g.push(...GS[i].g); GS.splice(i, 1); } }
     const mk = g => { let b = [Infinity, Infinity, -Infinity, -Infinity], cv = 0, circ = 0, burn = 0; g.forEach(o => { if (o.circ && o.r >= .05 && o.r <= .14) burn++; b = [Math.min(b[0], o.b[0]), Math.min(b[1], o.b[1]), Math.max(b[2], o.b[2]), Math.max(b[3], o.b[3])]; cv += o.cv; circ += o.circ; });
       const rect = !cv && KF_SAN.test(g[0].ly || '') && g.length >= 2, rb = rect ? KF_rbowls(g) : 0; if (rect) { burn = g.filter(o => o.cl && Math.abs((o.b[2] - o.b[0]) - (o.b[3] - o.b[1])) < .03 && (o.b[2] - o.b[0]) >= .12 && (o.b[2] - o.b[0]) <= .3).length; }
-      const bowl = rect ? rb : KF_bowls(g), tub = g.reduce((m, o) => o.cv ? Math.max(m, o.b[2] - o.b[0], o.b[3] - o.b[1]) : m, 0), w = b[2] - b[0], h = b[3] - b[1], t0 = rect && !(rb || g.some(o => o.cl && o.pts.length >= 7)) ? null : KF_guess(w, h, rect ? 1 : cv, circ, g.length, burn, bowl, tub), t = (g[0].resc && !cv && !circ) ? null : t0;
-      return { b, cv, circ, w, h, t, n: g.length, ly: g[0].ly, bowl }; };
-    const put = r => fx.push({ id: 'f' + (++n), b: r.b.map(v => Math.round(v * 1000) / 1000), t: r.t, ot: r.t, cv: r.cv, circ: r.circ, n: r.n, ly: r.ly, bw: r.bowl });
+      const bowl = rect ? rb : KF_bowls(g), tub = g.reduce((m, o) => o.cv ? Math.max(m, o.b[2] - o.b[0], o.b[3] - o.b[1]) : m, 0), w = b[2] - b[0], h = b[3] - b[1], t0 = rect && !(rb || g.some(o => o.cl && o.pts.length >= 7)) ? null : KF_guess(w, h, rect ? 1 : cv, circ, g.length, burn, bowl, tub);
+      let t = (g[0].resc && !cv && !circ) ? null : t0;
+      /* 和便器：細長い楕円（短い方 20〜36cm・長い方 50〜80cm・長さが幅の1.9倍以上）。丸い物がくっついて洗面台に見える時も、その形が中心なら便器
+         （sw.51：kaku_generation の KF_jbowl を取り込み。判定は鉢の輪郭＝曲線のかたまり自体の外形で、救済の箱の寸法では決めない） */
+      let jp = 0, how = '';
+      if (!t || t === 'counter' || t === 'sink') { const jb = KF_jbowl(g); if (jb) { t = 'toilet'; b = jb.b; jp = 1; how = 'jbowl'; } }
+      const diag = g.some(o => o.k === 'line' && !o.cv && Math.abs(o.pts[1][0] - o.pts[0][0]) > .1 && Math.abs(o.pts[1][1] - o.pts[0][1]) > .1 && Math.hypot(o.pts[1][0] - o.pts[0][0], o.pts[1][1] - o.pts[0][1]) >= .2) ? 1 : 0;
+      return { b, cv, circ, w: b[2] - b[0], h: b[3] - b[1], t, n: g.length, ly: g[0].ly, bowl, jp, diag, how }; };
+    const put = r => fx.push({ id: 'f' + (++n), b: r.b.map(v => Math.round(v * 1000) / 1000), t: r.t, ot: r.t, cv: r.cv, circ: r.circ, n: r.n, ly: r.ly, bw: r.bowl, jp: r.jp || 0, diag: r.diag || 0, how: r.how || '' });
     GS.map(o => o.g).forEach(g => { const r = mk(g), w = r.w, h = r.h;
       if (!r.t) {
         const lg = KF_lshape(g, r.b); if (lg) { const B = r.b, band = l => ({ S: [B[0], B[1], B[2], B[1] + l.D], N: [B[0], B[3] - l.D, B[2], B[3]], W: [B[0], B[1], B[0] + l.D, B[3]], E: [B[2] - l.D, B[1], B[2], B[3]] })[l.sd], bs = lg.map(band);
@@ -123,6 +129,11 @@ function KF_build(ents, P, roles) {
     if (x.t === 'sink' && w >= .3 && w <= .45 && d >= .28 && d <= .47 && d >= .8 * w && d <= 1.3 * w) x.uc = 1; });
   /* 手洗器・小便器は壁に付いている物だけ（椅子・丸テーブルなどを外す） */
   for (let k = fx.length - 1; k >= 0; k--) if ((fx[k].t === 'sink' || fx[k].t === 'unknown') && !(fx[k].back && fx[k].bd <= .1)) fx.splice(k, 1);
+  /* 和便器のロータンク：ブースの隅の三角（斜めの線のある 55cm までの小さい物）で、和便器から50cm以内の物は便器の一部。
+     手洗い・便器として数えない（三井屋の現況図で、かつに教わった。2026-11-22。sw.51：kaku_generation から取り込み） */
+  const JP = fx.filter(x => x.jp); if (JP.length) for (let k = fx.length - 1; k >= 0; k--) { const x = fx[k]; if (x.jp || !x.diag || !(x.t === 'sink' || x.t === 'toilet' || x.t === 'unknown')) continue;
+    if (Math.max(x.b[2] - x.b[0], x.b[3] - x.b[1]) > .55) continue;
+    if (JP.some(j => Math.max(j.b[0] - x.b[2], x.b[0] - j.b[2], 0) <= .5 && Math.max(j.b[1] - x.b[3], x.b[1] - j.b[3], 0) <= .5)) fx.splice(k, 1); }
   KF_urinals(fx);
   /* 1台だけの小便器の形の物は、部屋の名前が男子便所なら小便器 */
   fx.forEach(x => { if (!x.uc || x.t !== 'sink') return; const c = [(x.b[0] + x.b[2]) / 2, (x.b[1] + x.b[3]) / 2]; const f = P.faces.find(f => pip(c[0], c[1], f.poly)); if (f && /男子|男性|紳士|MEN|小便/i.test(f.name || '')) x.t = x.ot = 'urinal'; });
@@ -160,6 +171,17 @@ function KF_bowls(g) { const C = g.filter(o => Math.max(o.b[2] - o.b[0], o.b[3] 
   const K = B.filter(o => o.cv && Math.min(o.b[2] - o.b[0], o.b[3] - o.b[1]) >= .15 && Math.max(o.b[2] - o.b[0], o.b[3] - o.b[1]) <= .7); if (K.length < 2) return K.length;
   let G = [Infinity, Infinity, -Infinity, -Infinity]; g.forEach(o => { G = [Math.min(G[0], o.b[0]), Math.min(G[1], o.b[1]), Math.max(G[2], o.b[2]), Math.max(G[3], o.b[3])]; }); const mx = Math.max(...K.map(o => o.cv));
   return K.filter(o => o.cv >= mx * .25 || !(o.b[0] <= G[0] + .01 || o.b[1] <= G[1] + .01 || o.b[2] >= G[2] - .01 || o.b[3] >= G[3] - .01)).length; }
+/* 曲線のかたまり（鉢・便器の形）の外形。KF_bowls と同じつなぎ方で、85cm までの物
+   （sw.51：kaku_generation から取り込み） */
+function KF_curveBoxes(g) { const C = g.filter(o => !o.circ && Math.max(o.b[2] - o.b[0], o.b[3] - o.b[1]) <= .85); if (!C.some(o => o.cv) || C.length > 3000) return [];
+  const B = C.map(o => ({ b: [...o.b], cv: o.cv })); B.sort((p, q) => p.b[0] - q.b[0]); let ch = true, it = 0;
+  while (ch && it++ < 30) { ch = false; for (let i = 0; i < B.length; i++) for (let j = i + 1; j < B.length; j++) { const a = B[i].b, c = B[j].b; if (c[0] > a[2] + .01) break; if (c[1] <= a[3] + .01 && a[1] <= c[3] + .01) { const nb = [Math.min(a[0], c[0]), Math.min(a[1], c[1]), Math.max(a[2], c[2]), Math.max(a[3], c[3])]; if (Math.max(nb[2] - nb[0], nb[3] - nb[1]) > .85) continue; B[i].b = nb; B[i].cv += B[j].cv; B.splice(j, 1); ch = true; j--; } } }
+  return B.filter(o => o.cv); }
+/* 和便器の形：細長い楕円の曲線のかたまりが1つで、かたまり全体の曲線の半分以上を占める
+   （sw.51：kaku_generation から取り込み） */
+function KF_jbowl(g) { const cvAll = g.reduce((a, o) => a + o.cv, 0); if (cvAll < 8) return null;
+  const K = KF_curveBoxes(g).filter(o => { const s = Math.min(o.b[2] - o.b[0], o.b[3] - o.b[1]), l = Math.max(o.b[2] - o.b[0], o.b[3] - o.b[1]); return s >= .2 && s <= .36 && l >= .5 && l <= .8 && l >= 1.9 * s && o.cv >= 8; });
+  if (K.length !== 1 || K[0].cv < cvAll * .5) return null; return K[0]; }
 /* 四角い槽・ボウルの数（NEXT の KF_rshapes / KF_rbowls の写し） */
 function KF_rshapes(g) { const S = g.filter(o => o.cl).map(o => ({ b: o.b })); const Ls = g.filter(o => o.k === 'line'), par = Ls.map((_, i) => i), f = i => { while (par[i] !== i) { par[i] = par[par[i]]; i = par[i]; } return i; };
   const near = (p, q) => Math.abs(p[0] - q[0]) < .01 && Math.abs(p[1] - q[1]) < .01;
@@ -262,6 +284,8 @@ export function rescueFixtures(ents, plan, rot = 0, engineFixtures = [], roles =
       back: gback(x.back, rot),
       out: o ? rotG(o, rot).map(q3) : null,
       src: 'rescue', ly: x.ly || '',
+      /* 線の形で決めた印（sw.51：和便器だけ。表示とタイプ補正の扱いは project.js） */
+      ...(x.how ? { how: x.how } : {}),
     });
   }
   /* エンジンの器具と重なる物・救済同士で重なる物は出さない（エンジン優先） */

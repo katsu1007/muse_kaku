@@ -93,3 +93,45 @@ test('材料が無い・図面が無い時は空（読み込みを止めない�
   assert.deepEqual(rescueFixtures(mixedEnts(), null, 0, []), []);
   assert.deepEqual(rescueFixtures([], planOf(), 0, []), []);
 });
+
+/* 和便器の形（sw.51）：細長い楕円の鉢（275×655mm）を12個の円弧で描く＋中央の排水口の丸（φ100mm）。
+ * 輪郭（曲線のかたまり）で決めるので、箱は鉢そのものの大きさになる */
+const washikiEnts = (ly, dx = 0, dy = 0) => {
+  const out = [];
+  const cx = dx + 137.5, cy = dy + 327.5, rx = 137.5, ry = 327.5;
+  for (let k = 0; k < 12; k++) {
+    const a0 = k * 2 * Math.PI / 12, a1 = (k + 1) * 2 * Math.PI / 12, am = (a0 + a1) / 2;
+    out.push({ k: 'arc', ly, c: [cx, cy], r: 300, sweep: 30, pts: [
+      [cx + rx * Math.cos(a0), cy + ry * Math.sin(a0)],
+      [cx + rx * Math.cos(am), cy + ry * Math.sin(am)],
+      [cx + rx * Math.cos(a1), cy + ry * Math.sin(a1)],
+    ] });
+  }
+  out.push({ k: 'circle', ly, c: [cx, cy], r: 50 });
+  return out;
+};
+/* ロータンクの三角（320×320mm、斜めの線あり）＋小さい丸。和便器の100mm北に置く */
+const lowTankEnts = (ly, dx = 0, dy = 755) => [
+  { k: 'line', ly, a: [dx, dy], b: [dx + 320, dy] },
+  { k: 'line', ly, a: [dx, dy], b: [dx, dy + 320] },
+  { k: 'line', ly, a: [dx + 320, dy], b: [dx, dy + 320] },
+  { k: 'circle', ly, c: [dx + 160, dy + 95], r: 30 },
+];
+const planTank = () => ({ segs: [...planOf().segs, [-0.5, 1.095, 1.0, 1.095], [-0.5, 1.245, 1.0, 1.245]], faces: [] });
+
+test('和便器：細長い楕円の鉢は便器として救済され、印 jbowl と鉢の箱が付く（sw.51）', () => {
+  const r = rescueFixtures([...wallEnts('MIX'), doorArc('MIX'), ...washikiEnts('MIX')], planOf(), 0, []);
+  assert.equal(r.length, 1);
+  assert.equal(r[0].t, 'toilet');
+  assert.equal(r[0].how, 'jbowl');
+  assert.deepEqual(r[0].b, [0, 0, 0.275, 0.655]);
+});
+
+test('和便器のそばのロータンク（三角）は数えない。単独なら手洗いとして残る（sw.51）', () => {
+  const withW = rescueFixtures([...wallEnts('MIX'), doorArc('MIX'), ...washikiEnts('MIX'), ...lowTankEnts('MIX')], planTank(), 0, []);
+  assert.equal(withW.length, 1);
+  assert.equal(withW[0].how, 'jbowl');
+  const alone = rescueFixtures([...wallEnts('MIX'), doorArc('MIX'), ...lowTankEnts('MIX')], planTank(), 0, []);
+  assert.equal(alone.length, 1);
+  assert.equal(alone[0].t, 'sink');
+});
