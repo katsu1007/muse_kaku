@@ -130,16 +130,82 @@ test('タンク帯の証拠（実測値・高等学園の便器）：帯あり�
   }
 });
 
-test('タンク帯があっても、小便器形は洗面器との僅差が残れば確定しない（実測値）', () => {
-  /* sample1-F1（真値 小便器）の実測特徴：便器 0.954 対 洗面器 0.920、差 0.034。
-   * 小便器のシンボルにも中心線などで帯が読めるため、帯は便器の決め手には
-   * ならない。洗面器を候補に残すことで僅差のまま止まる */
+test('タンク帯があっても、小便器形は便器に確定しない（実測値）', () => {
+  /* sample1-F1（真値 小便器）の実測特徴：小便器のシンボルにも中心線などで帯が
+   * 読めるため、帯は便器の決め手にならない。2026-11-23 の小便器署名（内側鉢
+   * あり）で形の1位は小便器になったが、この測定値には内側閉形の詳細
+   * （innerShapes）が無いので証拠分岐は発火せず、確定はしない */
   const feat = { short: 370, long: 503, arcShare: 0.63, closed: true, innerClosed: true, dividers: 0, tankBand: true };
   const s = classifyFixtureShape(feat);
   assert.equal(s.verdict, 'near');
-  assert.equal(s.category, '洋式大便器');
+  assert.equal(s.category, '小便器');
   const d = classifyFixtureDisplay([0, 0, 0.37, 0.503], [], 1, feat);
   assert.notEqual(d.verdict, 'hit');
+});
+
+test('小便器の証拠分岐：内側の鉢の閉形（弧率0.55以上）までそろえば小便器に決着する（実測値）', () => {
+  /* sample1-F1 の実測（fixshape 本体基準）：鉢 269×292・弧率0.80。
+   * 辞書の再順位付け（便器を除く）で小便器 0.979 対 洗面器 0.920、差 0.059 */
+  const feat = { short: 370, long: 503, arcShare: 0.63, closed: true, innerClosed: true, dividers: 0, tankBand: true, innerShapes: [{ short: 269, long: 292, arcShare: 0.8, n: 40 }] };
+  const s = classifyFixtureShape(feat);
+  assert.equal(s.verdict, 'hit');
+  assert.equal(s.category, '小便器');
+  assert.equal(s.urinalShape, true);
+  const d = classifyFixtureDisplay([0, 0, 0.37, 0.503], [], 1, feat);
+  assert.equal(d.verdict, 'hit');
+  assert.equal(d.category, '小便器');
+  assert.equal(d.shapeBased, true);
+});
+
+test('小便器の証拠分岐：寸法の安全弁（長辺>460）だけが引っかかる形も、差0.05以上で決着する（実測値）', () => {
+  /* sample5-F22 の実測：380×509・鉢 271×357（弧率1.0）。安全弁が無ければ
+   * 小便器 0.986 対 洗面器 0.927 で確定できる形。証拠がそろう場合に限る */
+  const feat = { short: 380, long: 509, arcShare: 0.88, closed: true, innerClosed: true, dividers: 0, innerShapes: [{ short: 271, long: 357, arcShare: 1, n: 40 }] };
+  const s = classifyFixtureShape(feat);
+  assert.equal(s.verdict, 'hit');
+  assert.equal(s.category, '小便器');
+  /* sample5-F19（380×410・弧率1.0・帯なし）も同じ分岐で決着する */
+  const f19 = { short: 380, long: 410, arcShare: 1, closed: true, innerClosed: true, dividers: 0, tankBand: false, innerShapes: [{ short: 271, long: 312, arcShare: 1, n: 40 }] };
+  const s19 = classifyFixtureShape(f19);
+  assert.equal(s19.verdict, 'hit');
+  assert.equal(s19.category, '小便器');
+});
+
+test('小便器の証拠分岐：内側閉形の弧率が低い物（コートハンガー）は決着しない（実測値）', () => {
+  /* sample2-F14（真値 コートハンガー＝器具ではない）の実測：380×380・輪郭の
+   * 弧率0.72 で寸法と弧率は小便器の帯に入るが、内側閉形の弧率は 0.37 しかない。
+   * 証拠分岐は発火せず（urinalShape が付かない）、表示も確定にならない。
+   * 形だけの素の順位が小便器に傾くこと自体は従来どおりで、表示の確定は
+   * 証拠フラグのある物だけという sw.50 以来の約束で止める */
+  const feat = { short: 380, long: 380, arcShare: 0.72, closed: true, innerClosed: true, dividers: 0, innerShapes: [{ short: 250, long: 270, arcShare: 0.37, n: 20 }] };
+  const s = classifyFixtureShape(feat);
+  assert.equal(s.urinalShape, undefined);
+  const d = classifyFixtureDisplay([0, 0, 0.38, 0.38], [], 1, feat);
+  assert.notEqual(d.verdict, 'hit');
+  assert.equal(d.shapeBased, undefined);
+});
+
+test('洗面器の証拠分岐：角ばった輪郭＋鉢の閉形で洗面器に決着する（実測値）', () => {
+  /* sample5-F14 の実測：407×500・輪郭の弧率0.45・鉢 184×409（弧率0.86）。
+   * 箱だけでは便器 0.974 と接戦になる形。便器を除いた再順位付けで洗面器が立つ */
+  const feat = { short: 407, long: 500, arcShare: 0.45, closed: true, innerClosed: true, dividers: 0, innerShapes: [{ short: 184, long: 409, arcShare: 0.86, n: 40 }] };
+  const s = classifyFixtureShape(feat);
+  assert.equal(s.verdict, 'hit');
+  assert.equal(s.category, '洗面器');
+  assert.equal(s.basinShape, true);
+  const d = classifyFixtureDisplay([0, 0, 0.407, 0.5], [], 1, feat);
+  assert.equal(d.verdict, 'hit');
+  assert.equal(d.category, '洗面器');
+});
+
+test('衛生器具の証拠分岐：和式の鉢（幅275）には発火しない', () => {
+  /* jbowl 器具の保護：和式の鉢の輪郭（655×275・鉢 460×215）は両分岐の
+   * 寸法帯の外。分岐が便器・小便器・洗面器のどれにも決着させないこと */
+  const feat = { short: 275, long: 655, arcShare: 0.6, closed: true, innerClosed: true, dividers: 0, innerShapes: [{ short: 215, long: 460, arcShare: 0.9, n: 30 }] };
+  const s = classifyFixtureShape(feat);
+  assert.ok(!(s.verdict === 'hit' && (s.category === '小便器' || s.category === '洗面器' || s.category === '洋式大便器')), '衛生分岐で決着しないこと');
+  assert.equal(s.urinalShape, undefined);
+  assert.equal(s.basinShape, undefined);
 });
 
 test('SK形はタンク帯があっても便器にならない（実測値）', () => {

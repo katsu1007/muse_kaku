@@ -4,6 +4,7 @@
 import { masterItems } from './app.js';
 import { uid } from './store.js';
 import { modal, esc, yen, toast } from './ui.js';
+import { loadPreset, savePreset, clearPreset, presetFinFor, mergeInitial, isEmptyFin } from './finpreset.js';
 
 export const SLOTS = [
   { k: 'fD', part: '床', role: '解体', measure: 'floor', cats: ['demoF'] },
@@ -51,8 +52,13 @@ export function applyFin(p, rooms, fin) {
 }
 
 let lastFin = null;
-export function openRoomFin(p, rooms, { title, onDone } = {}) {
-  const M = masterItems(), first = currentFin(p, rooms[0]);
+export function openRoomFin(p, rooms, { title, onDone, usePreset } = {}) {
+  const M = masterItems();
+  /* 自社の標準の仕上げ（プリセット）：新しい部屋の時だけ、空の枠の初期値として入れる。今入っている物は上書きしない */
+  const preset = loadPreset(), pFin = presetFinFor(preset, M);
+  let first = currentFin(p, rooms[0]);
+  let fromPreset = false;
+  if (usePreset && pFin) { const before = first; first = mergeInitial(first, pFin); fromPreset = SLOTS.some(s => first[s.k] && !before[s.k]); }
   const opts = s => M.filter(i => s.cats.includes(i.cat) && i.measure === s.measure);
   const row = s => `<label class="f">${s.role || '品目'}<select class="in" data-slot="${s.k}"><option value="">${/解体/.test(s.role) ? '解体しない' : 'なし'}</option>${opts(s).map(i => `<option value="${esc(i.id)}" ${first[s.k] === i.id ? 'selected' : ''}>${esc(i.name)}${i.spec ? ' ' + esc(i.spec) : ''}（${yen(i.price)}/${esc(i.unit)}）</option>`).join('')}</select></label>`;
   const parts = ['床', '壁', '天井', '巾木'];
@@ -61,12 +67,25 @@ export function openRoomFin(p, rooms, { title, onDone } = {}) {
     title: title || '部屋の仕上げを決める', wide: true,
     body: `<p class="small muted" style="margin-top:0">${esc(names.slice(0, 4).join('・'))}${names.length > 4 ? ` ほか${names.length - 4}部屋` : ''}。選んだ物は③工事に入り、数量は部屋の面積・長さから自動で出ます。</p>
       ${lastFin ? `<button class="btn sm" data-same style="margin-bottom:8px">前の部屋と同じにする</button>` : ''}
+      <div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:8px">${pFin ? `<button class="btn sm" data-preset-use>標準の仕上げを入れる</button>` : ''}<button class="btn sm" data-preset-save>${preset ? 'この仕上げで標準を上書き' : 'この仕上げを標準にする'}</button>${preset ? `<button class="btn sm ghost danger" data-preset-clear>標準を消す</button>` : ''}</div>
+      ${fromPreset ? `<p class="small muted" style="margin-top:0">自社の「標準の仕上げ」を入れてあります。そのまま変えられます。</p>` : ''}
       ${parts.map(pt => `<div style="margin-bottom:10px"><b>${pt}</b><div class="grid g3" style="margin-top:4px">${SLOTS.filter(s => s.part === pt).map(row).join('')}</div></div>`).join('')}`,
     foot: `<button class="btn" data-later>あとで決める</button><button class="btn primary" data-ok>決定</button>`
   });
   const get = () => { const o = {}; m.el.querySelectorAll('[data-slot]').forEach(e => { o[e.dataset.slot] = e.value; }); return o; };
   const same = m.el.querySelector('[data-same]');
   if (same) same.onclick = () => { m.el.querySelectorAll('[data-slot]').forEach(e => { e.value = lastFin[e.dataset.slot] || ''; }); toast('前の部屋と同じにしました。決定で入ります'); };
+  const pUse = m.el.querySelector('[data-preset-use]');
+  if (pUse) pUse.onclick = () => { const f = presetFinFor(loadPreset(), M); if (!f) { toast('標準の仕上げがありません', { bad: true }); return; } m.el.querySelectorAll('[data-slot]').forEach(e => { e.value = f[e.dataset.slot] || ''; }); toast('標準の仕上げを入れました。決定で入ります'); };
+  const pSave = m.el.querySelector('[data-preset-save]');
+  if (pSave) pSave.onclick = () => {
+    const fin = get();
+    if (isEmptyFin(fin)) { toast('何も選ばれていないので、標準にはできません', { bad: true }); return; }
+    if (savePreset(fin)) { toast('標準の仕上げにしました。次に部屋を作る時から、最初から入ります'); pSave.textContent = 'この仕上げで標準を上書き'; }
+    else toast('標準を保存できませんでした', { bad: true });
+  };
+  const pClear = m.el.querySelector('[data-preset-clear]');
+  if (pClear) pClear.onclick = () => { clearPreset(); toast('標準の仕上げを消しました'); pClear.remove(); if (pUse) pUse.remove(); pSave.textContent = 'この仕上げを標準にする'; };
   m.el.querySelector('[data-later]').onclick = () => m.close();
   m.el.querySelector('[data-ok]').onclick = () => {
     const fin = get(); lastFin = fin; applyFin(p, rooms, fin); m.el.remove();

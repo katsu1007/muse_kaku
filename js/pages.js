@@ -4,6 +4,7 @@ import { MEASURES, KINDS, DEFAULTS } from './calc.js';
 import * as store from './store.js';
 import * as sync from './sync.js';
 import { BUILTIN_ITEMS } from './master-data.js';
+import { loadPreset, clearPreset, describePreset } from './finpreset.js';
 import { icon, esc, yen, toast, modal, ask, share, matchItem, $ } from './ui.js';
 
 /* ---------- 単価マスター ---------- */
@@ -135,6 +136,7 @@ function addItemDialog(after) {
 registerView('settings', async el => {
   setTop('設定');
   const s = state.settings, c = state.company;
+  const presetRows = describePreset(loadPreset(), masterItems());
   const cf = (k, l, ph = '') => `<label class="f">${l}<input class="in" data-c="${k}" value="${esc(c[k] || '')}" placeholder="${esc(ph)}"></label>`;
   const sf = (k, l, unit, hint = '') => `<label class="f">${l}${hint ? `<span class="hint">${hint}</span>` : ''}<div class="unitwrap"><input class="in num" type="number" inputmode="decimal" step="any" data-s="${k}" value="${esc(s[k] ?? '')}" placeholder="${esc(DEFAULTS[k] ?? '')}"><span>${unit}</span></div></label>`;
   el.innerHTML = `
@@ -149,6 +151,8 @@ registerView('settings', async el => {
       <div class="grid g4">${sf('matRate', '材料の掛け率', '%', '定価の何%で仕入れるか')}${sf('laborRate', '手間の原価率', '%', '手間の単価の何%が原価か')}${sf('loss', '材料のロス率', '%')}${sf('taxRate', '消費税', '%')}
       ${sf('ceilH', '天井高の標準', 'm')}${sf('doorArea', 'ドア1か所の面積', '㎡')}${sf('doorW', 'ドアの幅', 'm', '巾木から引く')}${sf('winArea', '窓1か所の面積', '㎡', '寸法を入れない時')}
       ${sf('overheadPct', '新しい案件の諸経費', '%')}${sf('profitPct', '新しい案件の利益', '%')}</div></div>
+    <div class="card"><h2>標準の仕上げ</h2><div class="sub">部屋を作った時に、最初から入れておく自社の標準の仕上げです。部屋の仕上げを決める画面で「この仕上げを標準にする」を押すと覚えます。覚えていない時は、今まで通り空から決めます。既にある部屋の仕上げは変わりません。</div>
+      ${presetRows.length ? `<p class="small" style="margin:0 0 8px">${presetRows.map(r => `${esc(r.label)}：${esc(r.name)}`).join('<br>')}</p><div class="row"><button class="btn" id="finPresetClear">標準を消す</button></div>` : '<p class="small muted" style="margin-bottom:0">まだ保存されていません。</p>'}</div>
     <div class="card"><h2>バックアップ</h2><div class="sub">案件・単価・設定をまとめて1つのファイルにします。機種変更の時や、念のため週に1回くらい書き出してください。${s.lastBackup ? `前回：${new Date(s.lastBackup).toLocaleDateString('ja-JP')}` : 'まだ書き出していません。'}</div>
       <div class="row"><button class="btn primary" id="bexp">${icon('down')}バックアップを書き出す</button>
       <label class="btn" style="cursor:pointer">${icon('up')}バックアップから戻す<input type="file" id="bimp" accept=".json,application/json" hidden></label></div>
@@ -171,6 +175,7 @@ registerView('settings', async el => {
       await saveSettings(); toast('保存しました');
     }
   });
+  const fpc = $('#finPresetClear'); if (fpc) fpc.onclick = () => { clearPreset(); toast('標準の仕上げを消しました'); render(); };
   $('#bexp').onclick = async () => {
     try {
       const data = await store.exportAll();

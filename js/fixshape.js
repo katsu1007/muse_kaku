@@ -194,15 +194,17 @@ export function createShapeIndex(segs) {
       if (s[0] > c.x0 + inset && s[0] < c.x1 - inset && s[2] > c.x0 + inset && s[2] < c.x1 - inset &&
           s[1] > c.y0 + inset && s[1] < c.y1 - inset && s[3] > c.y0 + inset && s[3] < c.y1 - inset) dividers++;
     }
-    /* 内側の閉曲線（ボウルの楕円など）があるか */
-    const innerClosed = (() => {
+    /* 内側の閉曲線（ボウルの楕円など）があるか。形ごとの詳細（大きさ・弧率）も集める：
+     * 衛生器具の証拠分岐（symdict の sanitaryShapeEvidence）が最大の閉形の弧率を使う。
+     * innerClosed の真偽の決め方は従来と同一（最初に条件を満たした塊で true）。 */
+    const innerInfo = (() => {
       const M = 0.045;
       const inner = pool.filter(i => {
         const s = S[i];
         return s[0] >= c.x0 + M && s[0] <= c.x1 - M && s[2] >= c.x0 + M && s[2] <= c.x1 - M &&
                s[1] >= c.y0 + M && s[1] <= c.y1 - M && s[3] >= c.y0 + M && s[3] <= c.y1 - M;
       });
-      if (inner.length < 6) return false;
+      if (inner.length < 6) return { closed: false, shapes: [] };
       const par2 = new Int32Array(inner.length);
       for (let j = 0; j < inner.length; j++) par2[j] = j;
       const find2 = a => { while (par2[a] !== a) { par2[a] = par2[par2[a]]; a = par2[a]; } return a; };
@@ -229,21 +231,29 @@ export function createShapeIndex(segs) {
       });
       const subs = new Map();
       inner.forEach((segIdx, j) => { const r = find2(j); if (!subs.has(r)) subs.set(r, []); subs.get(r).push(j); });
+      const shapes = [];
       for (const js of subs.values()) {
         if (js.length < 6) continue;
-        let pr = 0, x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        let pr = 0, x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, sl = 0, tl = 0;
         for (const j of js) {
           if (pairedIn.has(j * 2)) pr++;
           if (pairedIn.has(j * 2 + 1)) pr++;
           const s = S[inner[j]];
           x0 = Math.min(x0, s[0], s[2]); x1 = Math.max(x1, s[0], s[2]);
           y0 = Math.min(y0, s[1], s[3]); y1 = Math.max(y1, s[1], s[3]);
+          const L = segLen[inner[j]]; tl += L; if (L < SHORT_SEG) sl += L;
         }
         if (pr / (js.length * 2) < 0.9) continue;
-        if (x1 - x0 >= 0.08 && y1 - y0 >= 0.08) return true;
+        const w2 = x1 - x0, h2 = y1 - y0;
+        if (w2 >= 0.08 && h2 >= 0.08) shapes.push({
+          short: Math.round(Math.min(w2, h2) * 1000), long: Math.round(Math.max(w2, h2) * 1000),
+          arcShare: tl > 0 ? Math.round(sl / tl * 100) / 100 : 0, n: js.length,
+        });
       }
-      return false;
+      shapes.sort((a, b2) => (b2.short * b2.long) - (a.short * a.long));
+      return { closed: shapes.length > 0, shapes };
     })();
+    const innerClosed = innerInfo.closed;
 
     /* タンク帯：器具本体の線（受理した集まり）だけで測る。箱ではなく集まりの
      * 線を渡すのが肝心（hasTankBand 側で箱の中点フィルタもかかる）。
@@ -257,6 +267,7 @@ export function createShapeIndex(segs) {
       arcShare: len > 0 ? Math.round(Math.min(1, shortLen / len) * 100) / 100 : 0,
       closed: pairRatio >= 0.75,
       innerClosed,
+      innerShapes: innerInfo.shapes,
       dividers: Math.min(99, dividers),
       tankBand,
       n: c.segs.length, tier: best.tier,

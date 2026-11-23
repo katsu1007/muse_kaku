@@ -271,6 +271,24 @@ export const SYM_DICT = [
      "inner_closed": true,
      "n_entities": 16
     }
+   },
+   {
+    "origin": "rule",
+    "label": "小便器（内側鉢あり・JWW実図面）",
+    "size_range_mm": {
+     "short": [330, 430],
+     "long": [380, 580]
+    },
+    "aspect_range": [1.0, 1.6],
+    "primitives": {
+     "arc_share": [0.5, 1],
+     "closed_outline": true,
+     "inner_closed": true,
+     "divider_min": null,
+     "straight_back": false
+    },
+    "needs_features": ["innerClosed"],
+    "notes": "JWW実図面の小便器は内側の鉢（楕円）が閉じて描かれる（ジェイテクト370×503・三井屋380×509/380×410で実測）。旧ルール（inner_closed=false前提）は欧米ブロック由来で実図面では発火しないため、内側閉形を必須とする実図面向け署名を追加。寸法帯は実測3モデル＋REFERENCE（壁掛350〜410・ストール奥行420前後、描画は付属部込みで〜510）から一般化。発火はclassifyFixtureShapeの小便器証拠分岐（内側最大閉形の弧率≥0.55等）経由でのみ表示に効く。"
    }
   ]
  },
@@ -2827,6 +2845,24 @@ export const SYM_DICT = [
      "inner_closed": true,
      "n_entities": 29
     }
+   },
+   {
+    "origin": "rule",
+    "label": "流し台（長大・奥行600級）",
+    "scope": "dims",
+    "size_range_mm": {
+     "short": [520, 680],
+     "long": [3000, 3900]
+    },
+    "aspect_range": [4.4, 7.5],
+    "primitives": {
+     "arc_share": [0, 0.35],
+     "closed_outline": true,
+     "inner_closed": null,
+     "divider_min": null,
+     "straight_back": false
+    },
+    "notes": "業務用ステンレス流し台の平面署名。奥行は流し台の標準600（REFERENCE: 奥行550〜700・150の倍数系）から520〜680、長さは洗面カウンターの実測上限（〜2400）と分かれる3000以上に置く（ジェイテクトのステンレス流し台600×3600で実測・利用者確認済み）。ボウルが描かれない略図でも寸法だけで拾えるよう inner_closed は要求しない。器具表示では上限ルールにより類似どまり（確定はしない）。scope＝dims で寸法だけの候補（器具の箱）に限定し、線の特徴が分かるクラスタには当てない（江南の長大な帯状クラスタ660×3385等が机から流し台に化けるのを防ぐ。実測で確認済み）。"
    }
   ]
  },
@@ -3276,6 +3312,9 @@ function gateRange(v, range) { return v == null || range == null || (v >= range[
 export function scorePattern(p, f) {
   /* 特徴が要るパターン（例：ベンチデスクは分割線の本数が条件）は、特徴が無い入力（器具の寸法だけの判定）では当てない */
   if (p.needs_features) for (const k of p.needs_features) if (f[k] == null) return null;
+  /* 寸法だけの署名（scope:"dims"）は、線の特徴が分かる候補（家具クラスタ等）には当てない。
+   * 線がある物は線の署名で判断する（長大な帯状クラスタを流し台と誤らないため）。 */
+  if (p.scope === 'dims' && f.arcShare != null) return null;
   if (p.origin === "measured") {
     const s = p.features.size_mm;
     const tolS = Math.max(18, s.short * 0.05), tolL = Math.max(18, s.long * 0.05);
@@ -3355,22 +3394,75 @@ export const SYM_VERDICTS = {
 
 /* 図面から拾った器具の外形（b = [x0, y0, x1, y1]、単位は m）から辞書で判定する。
  * 器具のデータには外形しか無いので、判定に使う特徴は寸法だけ（円弧の割合・輪郭の閉じなどは null＝ゲートを通す）。
- * userDict（自分の辞書：利用者が「これは何か」を教えた { name, short, long } の配列）が最優先。
+ * userDict（自分の辞書：利用者が「これは何か」を教えた { name, short, long, feat? } の配列）が最優先。
  *   寸法が実測パターンと同じ許容（±max(18mm, 5%)）で合えば、その名前で検出（mine: true）。
+ *   feat（任意）：器具の形の特徴。署名（feat）付きの登録は、寸法に加えて形もほぼ同じ
+ *   時にだけ当てる（matchUserSym。署名の無い登録は従来どおり寸法だけ）。
  * scale（任意）：図面の寸法の自動補正（js/symscale.js）。図面の座標が実寸の scale 倍で
  *   描かれている時、寸法の判定だけ実寸（寸法÷scale）で行う。戻り値の short/long は
  *   図面から測ったままの値（表示用）。scale が 1 の時は従来と完全に同じ。
  * 戻り値: { verdict: "hit" | "near" | "unknown", category, score, short, long, mine? }（short/long は mm） */
-export function classifyBox(b, userDict = [], scale = 1) {
+/* 自分の辞書の「形の署名」（辞書の学習・2026-11-23、~/workspace/kaku/work/learning/）：
+ * 利用者が「これは何か」を教える時、寸法だけでなく、その時に測れた形の特徴
+ * （円弧の割合・輪郭の閉じ・内側の閉曲線・仕切り線の数）も一緒に覚える。
+ * 寸法だけの照合は実測で誤爆が多い（寸法のみの確定の正解率 15.9%）ため、
+ * 署名のある登録は「寸法＋形がほぼ同じ」物にだけ当てる。
+ * 意味論は従来どおり：自分の辞書は利用者本人が明示的に教えた判定なので
+ * 上書きとして扱い、当たれば落とさない（mine）。変えたのは発火範囲だけで、
+ * 署名の無い従来の登録は従来どおり寸法だけで照合する（互換性のため）。
+ * 署名に記録した特徴は、判定側で測れていない特徴とは照合できない
+ * （例：内側の閉曲線は器具の線からしか取れないので、家具クラスタには当たらない）。
+ * 許容の根拠：同じ型の繰り返しは実測で特徴が完全一致した（三井屋の洗面器
+ * クラスタ3件＝弧0.38・仕切り52本、日本モウルドの椅子4件＝弧0.82・仕切り0本）。
+ * 弧 ±0.15・仕切り ±2 は、その一致に対して余裕を持たせた幅で、寸法帯の違う
+ * 紛らわしい物（小便器 370×503 等）は寸法の時点で外れる。
+ * 線の本数 n も署名に入れる：シミュレーションで、寸法・弧・仕切りがほぼ同じ
+ * 洗面カウンター（600×2393・線67本）を教えたら、収納カウンター（600×2399・
+ * 線8本の素の輪郭）に当たって裏返りが1件出たため。本数は「どれだけ細かく
+ * 描かれた形か」で、素の輪郭と中身の描かれた器具はここが桁で違う。繰り返しの
+ * 同型は本数が完全一致するので、比 0.5〜2 倍に収まる物だけ当てる。 */
+export const USER_FEAT_ARC_TOL = 0.15;
+export const USER_FEAT_DIV_TOL = 2;
+export const USER_FEAT_N_RATIO = 2;
+
+/* 測れた特徴から、自分の辞書に覚える署名だけを取り出す（測れていない物は入れない）。
+ * feat は fixshape の特徴でも furndetect のクラスタでもよい。署名が空なら null */
+export function slimSymFeat(feat) {
+  if (!feat || typeof feat !== 'object') return null;
+  const o = {};
+  if (feat.arcShare != null && Number.isFinite(feat.arcShare)) o.arcShare = Math.round(feat.arcShare * 1000) / 1000;
+  if (feat.closed != null) o.closed = !!feat.closed;
+  if (feat.innerClosed != null) o.innerClosed = !!feat.innerClosed;
+  if (feat.dividers != null && Number.isFinite(feat.dividers)) o.dividers = feat.dividers;
+  if (feat.n != null && Number.isFinite(feat.n) && feat.n > 0) o.n = feat.n;
+  return Object.keys(o).length ? o : null;
+}
+
+/* 自分の辞書の1件 u が、実寸 eShort/eLong（mm）と特徴 feat に当たるか。
+ * 署名（u.feat）のある登録は、feat が無ければ照合できないので当てない */
+export function matchUserSym(u, eShort, eLong, feat = null) {
+  if (!u || !u.name || !(u.short > 0) || !(u.long > 0)) return false;
+  const tolS = Math.max(18, u.short * 0.05), tolL = Math.max(18, u.long * 0.05);
+  if (Math.abs(eShort - u.short) > tolS || Math.abs(eLong - u.long) > tolL) return false;
+  if (!u.feat) return true;
+  if (!feat) return false;
+  const f = u.feat;
+  if (f.arcShare != null && (feat.arcShare == null || Math.abs(feat.arcShare - f.arcShare) > USER_FEAT_ARC_TOL)) return false;
+  if (f.closed != null && (feat.closed == null || !!feat.closed !== !!f.closed)) return false;
+  if (f.innerClosed != null && (feat.innerClosed == null || !!feat.innerClosed !== !!f.innerClosed)) return false;
+  if (f.dividers != null && (feat.dividers == null || Math.abs(feat.dividers - f.dividers) > USER_FEAT_DIV_TOL)) return false;
+  if (f.n != null && (!(feat.n > 0) || feat.n > f.n * USER_FEAT_N_RATIO || f.n > feat.n * USER_FEAT_N_RATIO)) return false;
+  return true;
+}
+
+export function classifyBox(b, userDict = [], scale = 1, feat = null) {
   if (!b || b.length < 4) return { verdict: "unknown", category: null, score: 0, short: 0, long: 0 };
   const w = Math.abs(b[2] - b[0]) * 1000, h = Math.abs(b[3] - b[1]) * 1000;
   const short = Math.min(w, h), long = Math.max(w, h);
   const sc = (typeof scale === 'number' && Number.isFinite(scale) && scale > 0) ? scale : 1;
   const eShort = short / sc, eLong = long / sc;
   for (const u of userDict || []) {
-    if (!u || !u.name || !(u.short > 0) || !(u.long > 0)) continue;
-    const tolS = Math.max(18, u.short * 0.05), tolL = Math.max(18, u.long * 0.05);
-    if (Math.abs(eShort - u.short) <= tolS && Math.abs(eLong - u.long) <= tolL)
+    if (matchUserSym(u, eShort, eLong, feat))
       return { verdict: "hit", category: u.name, score: 1, short, long, mine: true };
   }
   const r = classifySymbol({ short, long, arcShare: null, closed: null, innerClosed: null, dividers: null }, sc);
@@ -3427,6 +3519,46 @@ const SHAPE_DISPLAY_KINDS = new Set(['オフィス什器']);
  *   （高等学園の小便器、三井屋の洗面器・手洗い）は従来どおり類似のまま。
  * - 帯が無い・測れない（tankBand が true でない）時はこの経路は使わず、
  *   形の判定は従来どおり（衛生器具は表示で確定しない）。 */
+/* 衛生器具の形の証拠分岐（2026-11-23、~/workspace/kaku/work/sanfix/）：
+ * タンク帯（sw.50）と同じ作りで、器具本体の線だけから測った証拠がそろった時だけ、
+ * 辞書の再順位付けで小便器／洗面器を「検出」にする。物差しでの検証：
+ *   小便器：ジェイテクト15件（370×503）・三井屋3件（380×509/380×410）が全件この形で、
+ *     内側の鉢の閉形の弧率は 0.68〜1.0。コートハンガー（三井屋でなく大天F14、380×380・
+ *     利用者確認済み「物ではない」）は内側閉形の弧率 0.37 でここで外れる。
+ *   洗面器：三井屋F14（407×500・鉢の閉形あり・輪郭は角ばって弧率0.45）。
+ *     SK（手洗い器）は仕切り線の多さ（99本）で外れる。
+ * どちらも「辞書が単独でその種類を返した時だけ」確定し、接戦は確定にしない。
+ * 小便器だけは寸法の安全弁（長辺>460）で要確認に落ちる形を、証拠がそろい
+ * スコア差0.05以上ある場合に限って確定として扱う（安全弁の趣旨は寸法だけの
+ * 誤認防止で、ここでは形の証拠が別にあるため）。 */
+function sanitaryShapeEvidence(feat, f, scale) {
+  if (feat.innerClosed !== true) return null;
+  if (feat.dividers == null || feat.dividers > 2) return null;
+  if (feat.arcShare == null) return null;
+  const shapes = Array.isArray(feat.innerShapes) ? feat.innerShapes : [];
+  if (!shapes.length || !(shapes[0].arcShare >= 0.55)) return null;
+  const sc = scale && scale > 0 ? scale : 1;
+  const sh = sc === 1 ? feat.short : feat.short / sc;
+  const lo = sc === 1 ? feat.long : feat.long / sc;
+  const arc = feat.arcShare;
+  if (sh >= 330 && sh <= 430 && lo >= 380 && lo <= 560 && arc >= 0.50) {
+    const ev = classifySymbol(f, scale, { exclude: ['洋式大便器'] });
+    if (ev.result === '小便器')
+      return { verdict: 'hit', category: '小便器', score: ev.score, second: ev.second, secondScore: ev.secondScore, chairScore: ev.chairScore, urinalShape: true };
+    if (ev.result === '要確認' && ev.category === '小便器' && ev.sizeVeto === 'urinal-size' &&
+        ev.score >= SYM_THRESHOLD && (ev.secondScore == null || ev.score - ev.secondScore >= 0.05))
+      return { verdict: 'hit', category: '小便器', score: ev.score, second: ev.second, secondScore: ev.secondScore, chairScore: ev.chairScore, urinalShape: true };
+    return null;
+  }
+  if (sh >= 370 && sh <= 570 && lo >= 440 && lo <= 760 && arc <= 0.50) {
+    const ev = classifySymbol(f, scale, { exclude: ['洋式大便器'] });
+    if (ev.result === '洗面器')
+      return { verdict: 'hit', category: '洗面器', score: ev.score, second: ev.second, secondScore: ev.secondScore, chairScore: ev.chairScore, basinShape: true };
+    return null;
+  }
+  return null;
+}
+
 export function classifyFixtureShape(feat, scale = 1) {
   if (!feat || !(feat.short > 0) || !(feat.long > 0)) return null;
   const f = {
@@ -3441,6 +3573,8 @@ export function classifyFixtureShape(feat, scale = 1) {
     if (ev.result === '洋式大便器')
       return { verdict: 'hit', category: '洋式大便器', score: ev.score, second: ev.second, secondScore: ev.secondScore, chairScore: ev.chairScore, tankBand: true };
   }
+  const sev = sanitaryShapeEvidence(feat, f, scale);
+  if (sev) return sev;
   const r = classifySymbol(f, scale);
   if (r.result === '不明') return { verdict: 'unknown', category: null, score: r.score, second: r.second, secondScore: r.secondScore, chairScore: r.chairScore };
   if (r.result === '要確認') return { verdict: 'near', category: r.category, score: r.score, second: r.second, secondScore: r.secondScore, chairScore: r.chairScore, sizeVeto: r.sizeVeto };
@@ -3448,15 +3582,16 @@ export function classifyFixtureShape(feat, scale = 1) {
 }
 
 export function classifyFixtureDisplay(b, userDict = [], scale = 1, feat = null) {
-  const r = classifyBox(b, userDict, scale);
+  const r = classifyBox(b, userDict, scale, feat);
   const base = { ...r, rawVerdict: r.verdict, boxCat: r.category, boxScore: r.score, boxVeto: r.sizeVeto || null };
   if (r.mine) return base;
   if (feat) {
     const s = classifyFixtureShape(feat, scale);
     /* 形の「検出」にするのは、オフィス什器で決着した物と、タンク帯の証拠で
-     * 決着した便器（s.tankBand が付いた物）だけ */
-    if (s && s.verdict === 'hit' && (SHAPE_DISPLAY_KINDS.has(SYM_KIND_OF.get(s.category)) || s.tankBand != null)) {
-      return { ...base, verdict: 'hit', category: s.category, score: s.score, second: s.second, secondScore: s.secondScore, chairScore: s.chairScore, sizeVeto: null, shapeBased: true, ...(s.tankBand != null ? { tankBand: s.tankBand } : {}) };
+     * 決着した便器（s.tankBand が付いた物）と、衛生器具の形の証拠分岐で
+     * 決着した小便器・洗面器（s.urinalShape / s.basinShape が付いた物）だけ */
+    if (s && s.verdict === 'hit' && (SHAPE_DISPLAY_KINDS.has(SYM_KIND_OF.get(s.category)) || s.tankBand != null || s.urinalShape != null || s.basinShape != null)) {
+      return { ...base, verdict: 'hit', category: s.category, score: s.score, second: s.second, secondScore: s.secondScore, chairScore: s.chairScore, sizeVeto: null, shapeBased: true, ...(s.tankBand != null ? { tankBand: s.tankBand } : {}), ...(s.urinalShape != null ? { urinalShape: s.urinalShape } : {}), ...(s.basinShape != null ? { basinShape: s.basinShape } : {}) };
     }
   }
   if (r.verdict !== 'hit') return base;
@@ -3632,7 +3767,8 @@ export function titleRegionFlags(boxes, regions = [], faces = [], marks = {}) {
 }
 
 /* 線の集まりから切り出した形（js/furndetect.js の候補）を判定する。
- * f: { short, long（mm）, arcShare, closed, dividers }。自分の辞書が最優先（寸法で照合）。
+ * f: { short, long（mm）, arcShare, closed, dividers }。自分の辞書が最優先
+ * （寸法で照合し、署名付きの登録は形も照合する＝matchUserSym）。
  * ctx（任意）: buildChairContexts が作る文脈。ある時だけ、「類似」を文脈で確定に上げる
  * （椅子ルートと衛生ルート。下の文脈判定の節を参照）。
  * ctx が無い時の戻り値は従来と完全に同じ。
@@ -3646,9 +3782,7 @@ export function classifyCluster(f, userDict = [], ctx = null, scale = 1, guard =
   const sc = (typeof scale === 'number' && Number.isFinite(scale) && scale > 0) ? scale : 1;
   const eShort = short / sc, eLong = long / sc;
   for (const u of userDict || []) {
-    if (!u || !u.name || !(u.short > 0) || !(u.long > 0)) continue;
-    const tolS = Math.max(18, u.short * 0.05), tolL = Math.max(18, u.long * 0.05);
-    if (Math.abs(eShort - u.short) <= tolS && Math.abs(eLong - u.long) <= tolL)
+    if (matchUserSym(u, eShort, eLong, f))
       return { verdict: "hit", category: u.name, score: 1, short, long, mine: true };
   }
   const r = classifySymbol({ short, long, arcShare: f.arcShare != null ? f.arcShare : null, closed: f.closed != null ? f.closed : null, innerClosed: null, dividers: f.dividers != null ? f.dividers : null }, sc);

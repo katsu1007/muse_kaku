@@ -1,7 +1,10 @@
 /* ⑤ 書類：見積書・請求書・内訳書（印刷してPDF保存）、Excel・CSV、見積もりの履歴と比較 */
-import { state, touch, opts, go } from './app.js';
+import { state, touch, opts, go, masterItems } from './app.js';
 import { totals, check, compare, roomGeom, KINDS, specOf } from './calc.js';
 import { projectXlsx, projectCsv } from './export.js';
+import { boardHtml } from './board.js';
+import { currentFin } from './roomfin.js';
+import { SYM_VERDICTS } from './symdict.js';
 import { floorsOf, autoFloors, floorBreakdown } from './floors.js';
 import { icon, esc, yen, fmt, today, toast, modal, ask, share, $ } from './ui.js';
 import { workChecks } from './workcheck.js';
@@ -18,6 +21,7 @@ export function docsStep({ p, body, refresh }) {
       ${errs ? `<div class="chk error" style="margin-bottom:14px">${icon('alert')}<span style="flex:1">確認が必要な所が ${errs} か所あります。④確認で直してから書類を作ってください。</span><a class="btn sm" href="#/p/${encodeURIComponent(p.id)}/4">確認へ</a></div>` : ''}
       <div class="docbtns">
         <button class="docbtn" data-doc="estimate">${icon('doc')}<div><b>見積書を出す</b><span>印刷・PDFで保存。第${(p.history || []).length + 1}版として記録します</span></div></button>
+        <button class="docbtn" data-doc="board">${icon('layers')}<div><b>根拠ボード</b><span>図面に拾い結果を重ねて、部屋ごとの数量の根拠を1枚に。記録はしません</span></div></button>
         <button class="docbtn" data-doc="invoice">${icon('print')}<div><b>請求書</b><span>振込先は設定の会社情報から</span></div></button>
         <button class="docbtn" data-doc="breakdown">${icon('grid')}<div><b>内訳書</b><span>工事の種類ごと・部屋ごとの数量</span></div></button>
         <button class="docbtn" data-doc="survey">${icon('checkc')}<div><b>現場調査のチェックリスト</b><span>印刷して現場に持って行く紙。部屋ごとの確かめる欄つき</span></div></button>
@@ -48,6 +52,7 @@ export function docsStep({ p, body, refresh }) {
     if (d) {
       const k = d.dataset.doc;
       if (k === 'estimate') return issueEstimate(p, draw);
+      if (k === 'board') return printDoc(boardHtml(p, opts(), await boardDeps(p)));
       if (k === 'invoice') return printDoc(invoiceHtml(p));
       if (k === 'breakdown') return printDoc(breakdownHtml(p));
       if (k === 'survey') return printDoc(surveyHtml(p));
@@ -78,6 +83,29 @@ async function issueEstimate(p, after) {
   after();
   printDoc(estimateHtml(p, no, date));
   toast(`第${no}版として記録しました。状態を「提出済」にしました`);
+}
+
+/* 根拠ボードの材料：辞書の判定・ゾーンの色・器具の数は project.js の中の物なので、
+ * 押した時にだけ読み込む（home.js の addSample と同じやり方）。仕上げの名前は今の行から取る。
+ * 材料が取れなくても、ボード自体（部屋と金額の根拠）は出す。案件のデータは読むだけ */
+async function boardDeps(p) {
+  const M = masterItems(), nm = id => (M.find(i => i.id === id) || {}).name || '';
+  const finOf = r => { const f = currentFin(p, r.id); return { fF: nm(f.fF), wF: nm(f.wF), cF: nm(f.cF), bF: nm(f.bF) }; };
+  const deps = { finOf, syms: [], zones: [], fixCounts: null };
+  const d = p.drawing;
+  if (!d || !d.plan) return deps;
+  try {
+    const PJ = await import('./project.js');
+    const S = PJ.symList(d), TF = PJ.typeFixMap(d);
+    deps.syms = S.filter(s => s && s.b).map(s => ({ b: s.b, v: s.verdict, color: SYM_VERDICTS[s.verdict].color,
+      label: s.verdict === 'hit' ? (s.category || '') : s.verdict === 'near' ? '類似' : '不明',
+      sub: !s.furn && s.t ? (FIX_NAMES[(TF[s.k] && TF[s.k].shown) || s.t] || '') : '' }));
+    deps.zones = PJ.zoneEntries(d);
+    const c = {};
+    (d.fixtures || []).forEach((x, k) => { const t = (TF[k] && TF[k].shown) || x.t; if (t && t !== 'other') c[t] = (c[t] || 0) + 1; });
+    deps.fixCounts = Object.entries(c).map(([t, n]) => ({ name: FIX_NAMES[t] || t, n }));
+  } catch (e) { console.warn('根拠ボードの材料づくりに失敗', e); }
+  return deps;
 }
 
 /* ---------- 比較 ---------- */

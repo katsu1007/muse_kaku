@@ -2,7 +2,7 @@
  * 期待値は実測した図形の特徴（CC0の小便器・実図面で同定したロッカー等）から決めた。 */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifySymbol, SYM_THRESHOLD } from '../js/symdict.js';
+import { classifySymbol, SYM_THRESHOLD, SYM_DICT, scorePattern } from '../js/symdict.js';
 
 test('しきい値は 0.90', () => { assert.equal(SYM_THRESHOLD, 0.90); });
 
@@ -524,4 +524,37 @@ test('層A：中心を含む区画のマークが out（title）の器具は該�
   assert.deepEqual(titleRegionFlags([[0, 0, 0.5, 0.5]], [], faces, { 7: { s: 'out', type: 'title' } }), [true]);
   assert.deepEqual(titleRegionFlags([[0, 0, 0.5, 0.5]], [], faces, { 7: { s: 'hold', type: 'title' } }), [false]);
   assert.deepEqual(titleRegionFlags([[0, 0, 0.5, 0.5]], [], [], {}), [false]);
+});
+
+test('流し台（長大・奥行600級）の署名：600×3600 の箱はキッチン・洗濯設備に当たる（実測値）', () => {
+  /* sample1-F0（真値 ステンレス流し台・利用者確認済み）。ボウルが描かれない
+   * 略図なので、寸法だけの署名で拾う。器具表示では上限ルールで類似どまり */
+  const r = classifyBox([0, 0, 0.6, 3.6], []);
+  assert.equal(r.verdict, 'hit');
+  assert.equal(r.category, 'キッチン・洗濯設備');
+  const d = classifyFixtureDisplay([0, 0, 0.6, 3.6], [], 1, null);
+  assert.equal(d.verdict, 'near');
+  assert.equal(d.category, 'キッチン・洗濯設備');
+  assert.equal(d.capped, true);
+});
+
+test('流し台の署名は scope=dims：線の特徴が分かる候補（クラスタ）には当てない', () => {
+  /* sample3 の長大な帯状クラスタ（660×3385・弧率0.01）が机から流し台に
+   * 化けないための限定。scorePattern が arcShare のある入力では null を返す */
+  const p = SYM_DICT.find(e => e.category === 'キッチン・洗濯設備').patterns.find(x => x.scope === 'dims');
+  assert.ok(p, 'scope=dims のパターンがあること');
+  assert.equal(scorePattern(p, { short: 660, long: 3385, arcShare: 0.01, closed: true, innerClosed: null, dividers: 99 }), null);
+  assert.ok(scorePattern(p, { short: 600, long: 3600, arcShare: null, closed: null, innerClosed: null, dividers: null }) >= 0.9);
+  const c = classifyCluster({ short: 660, long: 3385, arcShare: 0.01, closed: true, dividers: 99, n: 10 }, []);
+  assert.notEqual(c.category, 'キッチン・洗濯設備');
+});
+
+test('小便器（内側鉢あり）の署名は innerClosed が無い・false の入力では発火しない', () => {
+  /* needs_features と inner_closed の約束：器具の箱（寸法だけ）では当てず、
+   * 内側の鉢が閉じている形（classifyFixtureShape の証拠分岐）でのみ効く */
+  const p = SYM_DICT.find(e => e.category === '小便器').patterns.find(x => (x.needs_features || []).includes('innerClosed') && x.primitives && x.primitives.inner_closed === true);
+  assert.ok(p, '内側閉形を必須とする小便器パターンがあること');
+  assert.equal(scorePattern(p, { short: 370, long: 503, arcShare: 0.63, closed: true, innerClosed: null, dividers: 0 }), null);
+  assert.equal(scorePattern(p, { short: 370, long: 503, arcShare: 0.63, closed: true, innerClosed: false, dividers: 0 }), null);
+  assert.ok(scorePattern(p, { short: 370, long: 503, arcShare: 0.63, closed: true, innerClosed: true, dividers: 0 }) >= 0.9);
 });
