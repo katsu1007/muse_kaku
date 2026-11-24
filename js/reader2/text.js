@@ -7,6 +7,7 @@
  * 寸法の数字どうしはつながない（寸法線の上の別々の数字なので、つなぐと意味のない数字になる）。
  * 入力の文字は {t, x, y}（m）。今の読み取りからは文字の大きさ・向きが来ないので、並びの間隔だけで判断する */
 import { ROOMISH_RE } from './frame.js';
+import { roomNameEn, itemLabelEn } from '../textdict.js';
 
 const TITLE_RE = /工事名|図面名|図\s*番|縮\s*尺|SCALE|DATE|承\s*認|設\s*計|製\s*図|検\s*図|作\s*成|TITLE/i;
 /* 「金型作成室」「設計室」のように、表題欄の役職の言葉（作成・設計・製図・検図）を含んでいても
@@ -35,7 +36,14 @@ export function classify(t) {
   if (DIM_RE.test(n.replace(/\s/g, ''))) return 'dim';
   if (MODEL_RE.test(n)) return 'model';
   if (ITEM_RE.test(n)) return 'item';
+  /* 文の辞書（js/textdict.js・英語の器具ラベル）：単語境界の全体一致でだけ拾う。
+   * ただし「WC」は部屋名を優先する（単独の WC は従来どおり部屋名。item 側の WC は
+   * 詳細図・機器表の文脈専用で、ここでは奪わない） */
+  const ien = itemLabelEn(n);
+  if (ien && ien.canonical !== '洋式大便器') return 'item';
   if (n.length <= 16 && ROOMISH_RE.test(n)) return 'room';
+  /* 文の辞書（英語の部屋名）：全体一致（＋末尾の数字1つまで）でだけ拾う */
+  if (roomNameEn(n)) return 'room';
   return 'other';
 }
 

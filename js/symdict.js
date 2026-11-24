@@ -145,6 +145,35 @@ export const SYM_DICT = [
      "inner_closed": true,
      "n_entities": 5
     }
+   },
+   {
+    "origin": "rule",
+    "label": "矩形外形＋ボウル（簡略記号）",
+    "size_range_mm": {
+     "short": [
+      450,
+      540
+     ],
+     "long": [
+      550,
+      680
+     ]
+    },
+    "aspect_range": [
+     1.1,
+     1.4
+    ],
+    "primitives": {
+     "arc_share": [
+      0,
+      0.12
+     ],
+     "closed_outline": true,
+     "inner_closed": true,
+     "divider_min": null,
+     "straight_back": true
+    },
+    "notes": "簡略記号型：外形は矩形、ボウルは内側の閉じた円で描く描き方。平面表示記号（JIS A 0150 の流れ）の洋式便座の略し方と同型で、AIテスト図面 dxf_complex/07 の実測（外形500×600＋内円φ240）から一般化。実形の洋式（円弧の割合が大きい物）とは別物として、矩形＋内円のクラスタ専用（2026-11-24追加）"
    }
   ]
  },
@@ -593,6 +622,35 @@ export const SYM_DICT = [
      "inner_closed": true,
      "n_entities": 26
     }
+   },
+   {
+    "origin": "rule",
+    "label": "矩形カウンター＋ボウル（簡略記号）",
+    "size_range_mm": {
+     "short": [
+      460,
+      560
+     ],
+     "long": [
+      540,
+      660
+     ]
+    },
+    "aspect_range": [
+     1.05,
+     1.35
+    ],
+    "primitives": {
+     "arc_share": [
+      0,
+      0.12
+     ],
+     "closed_outline": true,
+     "inner_closed": true,
+     "divider_min": null,
+     "straight_back": true
+    },
+    "notes": "簡略記号型：矩形カウンター＋楕円ボウル。AIテスト図面 dxf_complex/07 の実測（外形600×500＋内楕円440×264）から一般化。寸法帯は JIS A 5207 の洗面器の大きさ（自治体機材標準図・広島市 令和7年度版：幅450〜610・奥行450〜480級）とも整合（2026-11-24追加）"
    }
   ]
  },
@@ -3300,6 +3358,237 @@ export const SYM_DICT = [
      "arcShare"
     ],
     "notes": "国交省「公共建築設備工事標準図（機械設備工事編）」の機材標準寸法：HB-1 幅700〜800×奥行200〜300、HB-4 幅600〜900×奥行200〜250、消火器箱併設形 幅900〜1,100×奥行200〜300。廊下壁際の浅い箱で、部屋・収納と誤らないために置く（2026-11-21 Web参照基準から追加。寸法という事実のみで、幾何は取り込んでいない）。寸法だけでは浅型カウンター洗面（600×250級）と区別できないため、線の特徴がある候補（クラスタ）にだけ当てる（needs_features）"
+   }
+  ]
+ },
+ {
+  "id": "washing-machine",
+  "category": "洗濯機",
+  "kind": "設備",
+  "patterns": [
+   {
+    "origin": "rule",
+    "label": "防水パン（640級）",
+    "size_range_mm": {
+     "short": [
+      615,
+      665
+     ],
+     "long": [
+      615,
+      665
+     ]
+    },
+    "aspect_range": [
+     1,
+     1.08
+    ],
+    "primitives": {
+     "arc_share": [
+      0,
+      0.3
+     ],
+     "closed_outline": true,
+     "inner_closed": null,
+     "divider_min": null,
+     "straight_back": null
+    },
+    "notes": "洗濯機防水パンの標準寸法 640×640（各社共通の規格寸法という事実）から。740×640・800×640 の大型パンもあるが、帯は640級に絞る（2026-11-24追加）"
+   },
+   {
+    "origin": "rule",
+    "label": "ドラム式",
+    "size_range_mm": {
+     "short": [
+      620,
+      660
+     ],
+     "long": [
+      695,
+      745
+     ]
+    },
+    "aspect_range": [
+     1.08,
+     1.2
+    ],
+    "primitives": {
+     "arc_share": [
+      0.1,
+      0.6
+     ],
+     "closed_outline": true,
+     "inner_closed": true,
+     "divider_min": null,
+     "straight_back": null
+    },
+    "notes": "ドラム式洗濯機の本体寸法（幅640×奥行720級、前面の円いドア＝内側の閉曲線と円弧）から一般化（2026-11-24追加）"
+   },
+   {
+    "origin": "rule",
+    "label": "縦型・本体",
+    "size_range_mm": {
+     "short": [
+      555,
+      615
+     ],
+     "long": [
+      555,
+      660
+     ]
+    },
+    "aspect_range": [
+     1,
+     1.15
+    ],
+    "primitives": {
+     "arc_share": [
+      0,
+      0.4
+     ],
+     "closed_outline": true,
+     "inner_closed": null,
+     "divider_min": null,
+     "straight_back": null
+    },
+    "notes": "縦型洗濯機の本体寸法（幅570〜600×奥行570〜630級）から一般化（2026-11-24追加）"
+   }
+  ]
+ },
+ {
+  "id": "water-heater",
+  "category": "電気温水器",
+  "kind": "設備",
+  "patterns": [
+   {
+    "origin": "rule",
+    "label": "丸形",
+    "size_range_mm": {
+     "short": [
+      640,
+      740
+     ],
+     "long": [
+      640,
+      740
+     ]
+    },
+    "aspect_range": [
+     1,
+     1.06
+    ],
+    "primitives": {
+     "arc_share": [
+      0.85,
+      1
+     ],
+     "closed_outline": true,
+     "inner_closed": false,
+     "divider_min": null,
+     "straight_back": null
+    },
+    "notes": "電気温水器の丸形：370L級 φ660・460L級 φ720（メーカー公表寸法という事実から一般化）。角形 630×730級は素の矩形で形が決まらないため入れない（2026-11-24追加）"
+   }
+  ]
+ },
+ {
+  "id": "floor-drain",
+  "category": "床排水口",
+  "kind": "衛生器具",
+  "patterns": [
+   {
+    "origin": "rule",
+    "label": "丸形（単円）",
+    "size_range_mm": {
+     "short": [
+      90,
+      190
+     ],
+     "long": [
+      90,
+      190
+     ]
+    },
+    "aspect_range": [
+     1,
+     1.12
+    ],
+    "primitives": {
+     "arc_share": [
+      0.85,
+      1
+     ],
+     "closed_outline": true,
+     "inner_closed": false,
+     "divider_min": null,
+     "straight_back": null
+    },
+    "notes": "床排水金具の目皿外径は配管径で決まる（JCW 203/204、中部コーポレーション公表値：40→φ100、50→φ130、65→φ155、75→φ180、100→φ215）。平面では φ100〜200級の円で描かれる。AIテスト図面の実測 φ120 とも一致（2026-11-24追加）"
+   },
+   {
+    "origin": "rule",
+    "label": "丸形（二重円）",
+    "size_range_mm": {
+     "short": [
+      90,
+      190
+     ],
+     "long": [
+      90,
+      190
+     ]
+    },
+    "aspect_range": [
+     1,
+     1.12
+    ],
+    "primitives": {
+     "arc_share": [
+      0.85,
+      1
+     ],
+     "closed_outline": true,
+     "inner_closed": true,
+     "divider_min": null,
+     "straight_back": null
+    },
+    "notes": "同上。二重円（目皿＋枠）で描かれる場合（2026-11-24追加）"
+   }
+  ]
+ },
+ {
+  "id": "vending-machine",
+  "category": "自販機",
+  "kind": "設備",
+  "patterns": [
+   {
+    "origin": "rule",
+    "label": "飲料自販機",
+    "size_range_mm": {
+     "short": [
+      720,
+      880
+     ],
+     "long": [
+      1080,
+      1280
+     ]
+    },
+    "aspect_range": [
+     1.3,
+     1.65
+    ],
+    "primitives": {
+     "arc_share": [
+      0,
+      0.15
+     ],
+     "closed_outline": true,
+     "inner_closed": null,
+     "divider_min": null,
+     "straight_back": null
+    },
+    "notes": "飲料自販機の本体寸法（幅1000〜1250×奥行700〜950級）から。正解コーパスで 800×1200 の2件が「机」と誤認されていた実測に合わせ、奥行720〜880×長さ1080〜1280 の帯に絞る（2026-11-24追加）"
    }
   ]
  }

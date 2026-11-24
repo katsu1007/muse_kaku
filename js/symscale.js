@@ -20,7 +20,14 @@
  * （中央絶対偏差 ÷ 中央値）が 5% を超える時は「決めきれない」として 1 のままにし、
  * 理由（why）を覚える。寸法は 3 件以上あり、中央値から 1% を超えて外れた物が
  * 2 割以下（＝8 割以上が一致）の時だけ使う。
- * この補正が効くのは辞書の寸法判定だけ。図面の線・区画・部屋・見積の数字は変えない。 */
+ * この補正が効くのは辞書の寸法判定だけ。図面の線・区画・部屋・見積の数字は変えない。
+ *
+ * 手入力（d.scaleUser・村中さんの指示 2026-11-24）：検証で確定できない所は赤文字で出し、
+ * 要確認リストから人が換算係数（実寸 = 図面で測った長さ × 係数）を決められる。
+ * 手入力がある図面では、自動の推定より手入力を優先する（symScaleFor が先に見る）。
+ * 効く範囲は、辞書の寸法判定（symScale.factor 経由）と、区画から作る部屋の広さ・周り
+ * （project.js の geoOf が scaleGeomBy で直す）だけ。自動の値では部屋の数字は直さない
+ * （「自動では直しません」の規律は従来どおり）。図面の線そのものは変えない。 */
 import { classifyCluster } from './symdict.js';
 import { dimCheckFor } from './dxf-dims.js';
 
@@ -117,15 +124,130 @@ export function estimateSymScale(input = {}) {
   return { factor: 1, source: null, n: longs.length, spread: null, why };
 }
 
+/* 手入力の係数（d.scaleUser）から作る symScale。同じ図面・同じ値なら同じ物を返す
+ * （呼び出し側のキャッシュが symScale の同一性で効くため）。保存データには混ぜない
+ * ので、モジュール側の WeakMap に覚える */
+const userScaleCache = new WeakMap();
+function userScale(d) {
+  const k = d && d.scaleUser;
+  if (!(typeof k === 'number' && Number.isFinite(k) && k > 0)) return null;
+  const c = userScaleCache.get(d);
+  if (c && c.coef === k) return c.obj;
+  const obj = { factor: 1 / k, source: 'user', n: 0, spread: null };
+  userScaleCache.set(d, { coef: k, obj });
+  return obj;
+}
+
+/* 人が決めた換算係数（実寸 = 図面で測った長さ × 係数）。決めていなければ null */
+export function userCoef(d) {
+  const k = d && d.scaleUser;
+  return (typeof k === 'number' && Number.isFinite(k) && k > 0) ? k : null;
+}
+
 /* 図面の覚え書き（drawing レコード）から symScale を用意する。dimCheckFor と同じ作り：
  * 読み込み時に付いていればそれを返し、無ければ覚えている寸法・器具・家具の候補から
- * 作り直して d.symScale に覚える（古い保存も、開いた時にその場で補える）。 */
+ * 作り直して d.symScale に覚える（古い保存も、開いた時にその場で補える）。
+ * 手入力（scaleUser）がある時は、自動の推定より手入力を優先する。 */
 export function symScaleFor(d) {
   if (!d) return { factor: 1, source: null, n: 0, spread: null, why: '図面が無い' };
+  const us = userScale(d);
+  if (us) return us;
   if (d.symScale) return d.symScale;
   let dimCheck = d.dimCheck || null;
   if (!dimCheck) { try { dimCheck = dimCheckFor(d); } catch (e) { dimCheck = null; } }
   const ss = estimateSymScale({ dimCheck, fixtures: d.fixtures || [], clusters: d.furn || [] });
   d.symScale = ss;
   return ss;
+}
+
+/* ===== 縮尺・換算係数の検証（表示と手入力の入口） =====
+ * 係数は「実寸 = 図面で測った長さ × 係数」で統一する（寸法の答え合わせの比率と
+ * 同じ向き。用紙mm 1/50 の図面なら約 50、実寸どおりなら 1）。
+ * 状態は4つ：
+ *   verified   寸法の答え合わせ（比率が 1% 以内）か、便器の大きさの証拠で確定
+ *   mismatch   寸法の答え合わせで比率が 1% を超えてずれている（値は赤で出す）
+ *   unverified 答え合わせできる材料が無く、係数 1 は仮の置き方（値は赤で出す）
+ *   manual     人が要確認リストから係数を決めた（出どころは手入力）
+ * 戻り値: { state, coef, autoCoef, source, n, why }
+ *   coef     今効いている係数（manual なら手入力、それ以外は自動の値）
+ *   autoCoef 自動だけならこの値（証拠が無ければ null）。編集画面の「自動に戻す」用
+ * この関数は図面レコードを書き換えない（dimCheckFor / symScaleFor が従来どおり
+ * 遅れて覚える分は除く）。 */
+export function scaleCheck(d) {
+  if (!d) return { state: 'unverified', coef: 1, autoCoef: null, autoSource: null, source: null, n: 0, why: '図面が無い' };
+  const auto = autoScaleOf(d);
+  const k = userCoef(d);
+  if (k !== null) return { state: 'manual', coef: k, autoCoef: auto ? auto.coef : null, autoSource: auto ? auto.source : null, source: 'user', n: auto ? auto.n : 0, why: (auto && auto.why) || '' };
+  if (auto) return { state: auto.state, coef: auto.coef, autoCoef: auto.coef, autoSource: auto.source, source: auto.source, n: auto.n, why: auto.why || '' };
+  return { state: 'unverified', coef: 1, autoCoef: null, autoSource: null, source: null, n: 0, why: unverifiedWhy(d) };
+}
+
+/* 自動の値だけを見る（手入力は見ない）。確定できる時は { state, coef, source, n }、
+ * 決めきれない時は null */
+function autoScaleOf(d) {
+  let chk = null;
+  try { chk = dimCheckFor(d); } catch (e) { chk = null; }
+  if (chk && chk.n >= 1 && typeof chk.median === 'number' && chk.median > 0) {
+    return Math.abs(chk.median - 1) > 0.01
+      ? { state: 'mismatch', coef: chk.median, source: 'dims', n: chk.n }
+      : { state: 'verified', coef: chk.median, source: 'dims', n: chk.n };
+  }
+  let ss = null;
+  try { ss = symScaleFor(d); } catch (e) { ss = null; }
+  /* symScaleFor は手入力も返すので、source が 'user' の時は自動の証拠とは扱わない */
+  if (ss && (ss.source === 'dims' || ss.source === 'symbols') && ss.factor > 0)
+    return { state: 'verified', coef: 1 / ss.factor, source: ss.source, n: ss.n };
+  return null;
+}
+
+/* 未検証の理由（人が要確認リストで見る文）。材料の有無で言い分ける */
+function unverifiedWhy(d) {
+  const dims = (d && d.dims) || [];
+  if (!dims.length) return '図面に寸法が書かれていないため、答え合わせできていません';
+  if (!dims.some(x => x && x.p1 && x.p2)) return '寸法に定義点が残っていないため答え合わせできません（図面を読み直すと出ます）';
+  let ss = null;
+  try { ss = symScaleFor(d); } catch (e) { ss = null; }
+  if (ss && ss.source !== 'user' && ss.why) return `寸法の証拠が弱く、${ss.why}ため、決めきれていません`;
+  return '答え合わせできる寸法が足りません';
+}
+
+/* 要確認リストをタップした時の、プレビューの飛び先（図面座標 m の [x1,y1,x2,y2]）。
+ * 優先順位：寸法の定義点（座標が図面の範囲内にある時だけ）→ 便器の器具 → 一番大きい区画。
+ * どれも無ければ null（全体表示のまま編集だけ開く） */
+export function scaleTargetFor(d) {
+  if (!d) return null;
+  const faces = (d.plan && d.plan.faces) || [];
+  let bb = null;
+  faces.forEach(f => { if (!f || !f.poly) return; f.poly.forEach(q => { if (!bb) bb = [q[0], q[1], q[0], q[1]]; else { bb[0] = Math.min(bb[0], q[0]); bb[1] = Math.min(bb[1], q[1]); bb[2] = Math.max(bb[2], q[0]); bb[3] = Math.max(bb[3], q[1]); } }); });
+  const dims = (d.dims || []).filter(x => x && x.p1 && x.p2);
+  if (dims.length && bb) {
+    const x = dims[0];
+    const box = [Math.min(x.p1.x, x.p2.x) / 1000, Math.min(x.p1.y, x.p2.y) / 1000, Math.max(x.p1.x, x.p2.x) / 1000, Math.max(x.p1.y, x.p2.y) / 1000];
+    /* 寸法の座標（mm→m）が図面の範囲（少し広げた物）の中にある時だけ使う。
+     * 読み取りで原点や向きが変わっている図面では、合わない所へ飛ばないようにする */
+    const pad = Math.max(bb[2] - bb[0], bb[3] - bb[1]) * 0.1 + 1;
+    if (box[0] >= bb[0] - pad && box[2] <= bb[2] + pad && box[1] >= bb[1] - pad && box[3] <= bb[3] + pad) {
+      const p = 1;
+      return [box[0] - p, box[1] - p, box[2] + p, box[3] + p];
+    }
+  }
+  const fx = (d.fixtures || []).find(x => x && x.t === 'toilet' && x.b) || (d.fixtures || []).find(x => x && x.b);
+  if (fx) { const p = 0.6; return [fx.b[0] - p, fx.b[1] - p, fx.b[2] + p, fx.b[3] + p]; }
+  if (faces.length) {
+    let big = null;
+    faces.forEach(f => { if (f && f.poly && (!big || (f.area || 0) > (big.area || 0))) big = f; });
+    if (big) { let b = null; big.poly.forEach(q => { if (!b) b = [q[0], q[1], q[0], q[1]]; else { b[0] = Math.min(b[0], q[0]); b[1] = Math.min(b[1], q[1]); b[2] = Math.max(b[2], q[0]); b[3] = Math.max(b[3], q[1]); } }); return b; }
+  }
+  return null;
+}
+
+/* 部屋の広さ・周りを、手入力の係数で実寸に直す（長さは ×k、面積は ×k²）。
+ * 座標そのもの（holes.runs など、絵に出す位置）は変えない。k が 1 の時・
+ * 形が無い時は、渡された物をそのまま返す */
+export function scaleGeomBy(geom, k) {
+  if (!geom || !(typeof k === 'number' && Number.isFinite(k) && k > 0) || k === 1) return geom;
+  const r2 = v => Math.round(v * 100) / 100;
+  const out = { ...geom, area: r2((geom.area || 0) * k * k), perim: r2((geom.perim || 0) * k) };
+  if (geom.holes) out.holes = { ...geom.holes, area: r2((geom.holes.area || 0) * k * k) };
+  return out;
 }
