@@ -105,7 +105,9 @@ export function planView(box, plan, opt = {}) {
     visT = requestAnimationFrame(() => {
       const r = svg.getBoundingClientRect(); if (!r.width) return;
       const sc = Math.min(r.width / vb[2], r.height / vb[3]); let hid = 0;
-      svg.querySelectorAll('.labels text').forEach(t => { const fz = +t.dataset.fz || fs, on = fz * sc >= 7; if (on) { t.removeAttribute('display'); t.setAttribute('font-size', Math.min(fz, (+t.dataset.cap || 17) / sc)); } else { t.setAttribute('display', 'none'); hid++; } });   // 大きく拡大した時は、字を画面で 17px までにする
+      svg.querySelectorAll('.labels text').forEach(t => { const fz = +t.dataset.fz || fs, on = fz * sc >= (+t.dataset.min || 7); if (on) { t.removeAttribute('display'); t.setAttribute('font-size', Math.min(fz, (+t.dataset.cap || 17) / sc)); } else { t.setAttribute('display', 'none'); hid++; } });   // 大きく拡大した時は、字を画面で上限（data-cap、無ければ 17px）までにする。下限（data-min）未満の物は出さない
+      /* ゾーンの名前：そのまま出すと図全体で重なって図面が見えなくなるので、区画の字より先に隠し（下限 11px）、上限も小さめ（12px）にする */
+      svg.querySelectorAll('.zones text').forEach(t => { const fz = +t.dataset.fz || 0, on = fz * sc >= (+t.dataset.min || 11); if (on) { const ef = Math.min(fz, (+t.dataset.cap || 12) / sc); t.removeAttribute('display'); t.setAttribute('font-size', ef); t.setAttribute('stroke-width', ef * 0.18); } else t.setAttribute('display', 'none'); });
       /* 上に重ねる印（測った長さなど）で、画面の大きさを決めた物：data-px＝字の大きさ（px）、data-r＝丸の半径（px）。拡大しても画面で同じ大きさ */
       svg.querySelectorAll('.overlay [data-px]').forEach(t => { const px = +t.dataset.px; t.setAttribute('font-size', px / sc); t.setAttribute('stroke-width', px * 0.25 / sc); });
       svg.querySelectorAll('.overlay [data-r]').forEach(c => c.setAttribute('r', +c.dataset.r / sc));
@@ -125,12 +127,13 @@ export function planView(box, plan, opt = {}) {
     svg.querySelector('.fixes').innerHTML = (opt.fixtures ? opt.fixtures() : []).map((x, k) => x.t === 'other' && k !== fsel ? '' : fixBox(x, lw, k === fsel)).join('');
     svg.querySelector('.syms').innerHTML = (opt.symbols ? opt.symbols() : []).map(s => symMark(s, lw)).join('');
     const rjg = svg.querySelector('.rjudge');
-    if (rjg) rjg.innerHTML = (opt.roomJudge ? opt.roomJudge() : []).map(e => `<polygon points="${e.poly.map(p => p[0] + ',' + -p[1]).join(' ')}" fill="${e.color}" fill-opacity="${e.op || 0}" stroke="${e.color}" stroke-opacity="${e.so != null ? e.so : 0.9}" stroke-width="${lw * 2}" ${e.dash ? `stroke-dasharray="${lw * 6} ${lw * 4}"` : ''}/>`).join('');
+    /* 部屋の見分けの枠：全区画に引くと網目になって図面の線が見えなくなるので、細く・薄くする（色そのものは変えない） */
+    if (rjg) rjg.innerHTML = (opt.roomJudge ? opt.roomJudge() : []).map(e => `<polygon points="${e.poly.map(p => p[0] + ',' + -p[1]).join(' ')}" fill="${e.color}" fill-opacity="${e.op || 0}" stroke="${e.color}" stroke-opacity="${Math.round((e.so != null ? e.so : 0.9) * 55) / 100}" stroke-width="${lw * 1.1}" ${e.dash ? `stroke-dasharray="${lw * 6} ${lw * 4}"` : ''}/>`).join('');
     const zng = svg.querySelector('.zones');
     if (zng) { const ZE = v => String(v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
       zng.innerHTML = (opt.zones ? opt.zones() : []).map(e => e.poly
         ? `<polygon points="${e.poly.map(p => p[0] + ',' + -p[1]).join(' ')}" fill="${e.color}" fill-opacity="${e.op != null ? e.op : 0.16}"/>`
-        : `<text x="${e.lx}" y="${-e.ly}" font-size="${lw * 15}" text-anchor="middle" dominant-baseline="central" fill="${e.color}" font-weight="700" stroke="var(--bg)" stroke-width="${lw * 2.7}" paint-order="stroke">${ZE(e.label)}</text>`).join(''); }
+        : `<text x="${e.lx}" y="${-e.ly}" font-size="${lw * 15}" data-fz="${lw * 15}" data-cap="12" data-min="11" text-anchor="middle" dominant-baseline="central" fill="${e.color}" font-weight="700" stroke="var(--bg)" stroke-width="${lw * 2.7}" paint-order="stroke">${ZE(e.label)}</text>`).join(''); }
     const sel = opt.selected ? opt.selected() : new Set();
     const byI = new Map(plan.faces.map(f => [f.i, f]));
     const RL = opt.rooms ? opt.rooms() : [], roomOf = new Map(); RL.forEach((r, k) => r.faces.forEach(i => roomOf.set(i, k)));
@@ -149,16 +152,16 @@ export function planView(box, plan, opt = {}) {
       if (o != null && !s && roomOf.has(f.i)) return '';   // 部屋にした区画は、部屋の名前を1つだけ出す（下の roomLabels）
       const m = !s && o == null ? mk(f) : null;
       /* 図面の文字を出している時は、まだ部屋にしていない区画の番号を小さく薄くする（図面の文字が先。選んだ・部屋にした区画はそのまま） */
-      const dim = !!opt.dtexts && txtOn() && !s && o == null, fz = (fzOf.get(f.i) || fs) * (dim ? 0.6 : 1), dz = dim ? ' data-cap="11" opacity=".55"' : '';
+      const dim = !!opt.dtexts && txtOn() && !s && o == null, fz = (fzOf.get(f.i) || fs) * (dim ? 0.6 : 1), dz = dim ? ' data-cap="11" data-min="8.5" opacity=".55"' : '', capz = dim ? '' : ' data-cap="13" data-min="8.5"';   // 区画の字は、ゾーンの名前の次に隠し、上限も 13px に抑える（部屋の名前が最後まで残る）
       const kind = m ? (m.s === 'join' ? 'まとめ済' : m.s === 'out' ? (m.type === 'frame' ? '図枠' : m.type === 'title' ? '表題欄' : m.type === 'sheet' ? '使わない図' : m.type === 'off' ? '区画ではない' : '表') : '？') : '';
       if (m && m.hide) return '';   // 表・表題欄・区画ではない所は、区画の字を出さない（図面の文字を下の dtexts で出す）
-      if (m) return `<text x="${f.cx}" y="${-f.cy}" font-size="${fz}" data-fz="${fz}"${dz} fill="${m.s === 'out' ? 'var(--faint)' : 'var(--warn)'}" font-weight="700" pointer-events="none">${kind}<tspan x="${f.cx}" dy="1.15em" font-weight="400" font-size="0.8em">区画${f.no}</tspan></text>`;
-      return `<text x="${f.cx}" y="${-f.cy}" font-size="${fz}" data-fz="${fz}"${dz} fill="${s ? 'var(--accent)' : o != null ? roomColor(o) : 'var(--muted)'}" font-weight="700" pointer-events="none">区画${f.no}<tspan x="${f.cx}" dy="1.15em" font-weight="400" font-size="0.8em">${(Math.round(f.area * 100) / 100)}㎡</tspan></text>`;
+      if (m) return `<text x="${f.cx}" y="${-f.cy}" font-size="${fz}" data-fz="${fz}"${dz}${capz} fill="${m.s === 'out' ? 'var(--faint)' : 'var(--warn)'}" font-weight="700" pointer-events="none">${kind}<tspan x="${f.cx}" dy="1.15em" font-weight="400" font-size="0.8em">区画${f.no}</tspan></text>`;
+      return `<text x="${f.cx}" y="${-f.cy}" font-size="${fz}" data-fz="${fz}"${dz}${capz} fill="${s ? 'var(--accent)' : o != null ? roomColor(o) : 'var(--muted)'}" font-weight="700" pointer-events="none">区画${f.no}<tspan x="${f.cx}" dy="1.15em" font-weight="400" font-size="0.8em">${(Math.round(f.area * 100) / 100)}㎡</tspan></text>`;
     }).join('') + RL.map(r => {
       /* 部屋の名前の位置：いちばん広い区画の字の位置。字の大きさもその区画に合わせて少し大きく */
       const F = r.faces.map(i => byI.get(i)).filter(Boolean); if (!F.length || F.every(f => sel.has(f.i))) return '';
       const big = F.reduce((a, b) => (b.area > a.area ? b : a)), bx = big.poly ? big.poly.map(q => q[0]) : [0, 1], bw = Math.max(...bx) - Math.min(...bx), fz = Math.max(0.02, Math.min((fzOf.get(big.i) || fs) * 1.15, bw / (String(r.name).length + 1.5))), E2 = v => String(v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-      return `<text x="${big.cx}" y="${-big.cy}" font-size="${fz}" data-fz="${fz}" fill="${roomColor(r.color)}" font-weight="700" pointer-events="none">${E2(r.name)}<tspan x="${big.cx}" dy="1.15em" font-weight="400" font-size="0.8em">${Math.round((r.area || F.reduce((a, f) => a + f.area, 0)) * 100) / 100}㎡${F.length > 1 ? `（${F.length}区画）` : ''}</tspan></text>`;
+      return `<text x="${big.cx}" y="${-big.cy}" font-size="${fz}" data-fz="${fz}" data-cap="15" fill="${roomColor(r.color)}" font-weight="700" pointer-events="none">${E2(r.name)}<tspan x="${big.cx}" dy="1.15em" font-weight="400" font-size="0.8em">${Math.round((r.area || F.reduce((a, f) => a + f.area, 0)) * 100) / 100}㎡${F.length > 1 ? `（${F.length}区画）` : ''}</tspan></text>`;
     }).join('');
     /* 区画ではない所（表・表題欄など）に書いてある図面の文字を、その場所にそのまま出す（左下が文字の位置） */
     const E = v => String(v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);

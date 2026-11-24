@@ -275,6 +275,59 @@ export function polygonizeFaces(segs, { snap = 0.01 } = {}) {
   return outers.filter(o => o.area > 1e-7).map(o => ({ poly: o.poly, area: o.area, peri: perim(o.poly), holes: o.holes || [] }));
 }
 
+const q3 = v => Math.round(v * 1000) / 1000;
+
+/* 線の集まり（端点の近さでつながった成分）のうち、外形が家具クラスタと一致する物の線を
+ * 除いた線プールを返す。補足区画を作る時だけ使う（wallzone 試行・2026-11-23 の実測）：
+ * 家具の線が部屋の中を細切れにするため、辞書で「検出」になった家具の線を外すと補足の
+ * 断片が減る（江南・大天・日本モウルド）。エンジン区画・ゾーン・部屋判定の入力には
+ * 使わない（ゾーン側にまで広げると、開いた事務所で机の列が仕切りの代わりをしている
+ * 図面でゾーン名が消えるなどの実害が測定で出たため。対象の決め方は project.js 側）。
+ * targets：[{ b:[x0,y0,x1,y1], n }]（n はクラスタの線の本数）。外形が一致する成分のうち、
+ * 線の本数も合う物だけを外す（外形だけでは壁の集まりと取り違える）。候補が複数あって
+ * 本数で決められない時は外さない（分からない物は外さない） */
+export function segsWithoutClusters(segs, targets) {
+  const list = (targets || []).filter(t => t && t.b && t.b.length >= 4);
+  if (!list.length) return segs || [];
+  const S = (segs || []).map((s, i) => ({ s, i })).filter(({ s }) => s && s.length >= 4 && (Math.abs(s[2] - s[0]) > 1e-9 || Math.abs(s[3] - s[1]) > 1e-9));
+  if (!S.length) return segs || [];
+  /* furndetect と同じ端点近接（0.045m）で線をつなぐ */
+  const TOL = 0.045, CELL = 0.05;
+  const par = new Map(S.map(({ i }) => [i, i]));
+  const find = a => { while (par.get(a) !== a) { par.set(a, par.get(par.get(a))); a = par.get(a); } return a; };
+  const grid = new Map();
+  const cellOf = (x, y) => Math.floor(x / CELL) + ':' + Math.floor(y / CELL);
+  S.forEach(({ s, i }) => {
+    [[s[0], s[1]], [s[2], s[3]]].forEach(([x, y]) => {
+      const cx = Math.floor(x / CELL), cy = Math.floor(y / CELL);
+      for (let gx = cx - 1; gx <= cx + 1; gx++) for (let gy = cy - 1; gy <= cy + 1; gy++) {
+        const arr = grid.get(gx + ':' + gy); if (!arr) continue;
+        for (const o of arr) { const dx = o.x - x, dy = o.y - y; if (dx * dx + dy * dy <= TOL * TOL) { const ra = find(i), rb = find(o.seg); if (ra !== rb) par.set(ra, rb); } }
+      }
+      const k = cellOf(x, y); let arr = grid.get(k); if (!arr) { arr = []; grid.set(k, arr); }
+      arr.push({ x, y, seg: i });
+    });
+  });
+  const comps = new Map();
+  S.forEach(({ s, i }) => {
+    const r = find(i);
+    if (!comps.has(r)) comps.set(r, { idxs: [], b: [1e9, 1e9, -1e9, -1e9] });
+    const c = comps.get(r); c.idxs.push(i);
+    c.b[0] = Math.min(c.b[0], s[0], s[2]); c.b[1] = Math.min(c.b[1], s[1], s[3]);
+    c.b[2] = Math.max(c.b[2], s[0], s[2]); c.b[3] = Math.max(c.b[3], s[1], s[3]);
+  });
+  const byBox = new Map();
+  comps.forEach(c => { const k = c.b.map(q3).join(','); if (!byBox.has(k)) byBox.set(k, []); byBox.get(k).push(c); });
+  const drop = new Set();
+  for (const t of list) {
+    const cands = byBox.get(t.b.join(',')) || [];
+    const c = cands.find(c => c.idxs.length === t.n) || (cands.length === 1 ? cands[0] : null);
+    if (c) c.idxs.forEach(i => drop.add(i));
+  }
+  if (!drop.size) return segs || [];
+  return (segs || []).filter((_, i) => !drop.has(i));
+}
+
 /* 補足区画を作る：線を輪郭化し、エンジン区画の補いになる物だけを残す。
  * 引数：segs（図面の線・全部）、faces（エンジン区画。切り目と重なりの判定に使う）、
  *       fixtures（器具。内側の線を除くため）、texts・doors（根拠の届く範囲の判定）、

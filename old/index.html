@@ -1501,6 +1501,14 @@ function KF_build(ents,P,fac,roles){roles=roles||{};const m=1/1000;
           const run={};g.forEach(o=>{if(o.k!=='line')return;const [p,q]=o.pts,hz=Math.abs(p[1]-q[1])<.005,vt=Math.abs(p[0]-q[0])<.005;if(!hz&&!vt)return;const k=(hz?'h':'v')+Math.round((hz?p[1]:p[0])*100);o._rk=k;run[k]=(run[k]||0)+Math.hypot(q[0]-p[0],q[1]-p[1])});
           const big=o=>(o.b[2]-o.b[0])>=w*.85&&(o.b[3]-o.b[1])>=h*.85||(o.k==='line'||o.k==='poly'&&!o.cv)&&Math.max(o.b[2]-o.b[0],o.b[3]-o.b[1])>=Math.max(w,h)*.8||o._rk&&run[o._rk]>=Math.max(w,h)*.6;
           const rest2=g.filter(o=>!big(o));if(rest2.length&&rest2.length<g.length)group(rest2,depth+1)}return}
+      /* 洗面カウンターの端にくっついた SK を分ける（2026-11-23・むぎの SK の形）：曲線の無い閉じた四角（短い方42〜50cm・長い方44〜74cm）の中に、
+         片側4〜11cm 内側の曲線の無い閉じた四角と、その中に12cm までの丸（排水口）がある物。洗面器は内側が楕円・丸なので入らない */
+      if(r.t==='counter'&&depth<2){const sk=g.filter(o=>{if(!(o.cl&&!o.cv&&o.k==='poly'))return false;const w0=o.b[2]-o.b[0],h0=o.b[3]-o.b[1],s0=Math.min(w0,h0),l0=Math.max(w0,h0);if(s0<.42||s0>.5||l0<.44||l0>.74)return false;
+          const inn=g.filter(q=>q!==o&&q.cl&&!q.cv&&q.k==='poly'&&[q.b[0]-o.b[0],o.b[2]-q.b[2],q.b[1]-o.b[1],o.b[3]-q.b[3]].every(v=>v>=.04&&v<=.11));
+          return inn.some(I=>g.some(c=>c.circ&&Math.max(c.b[2]-c.b[0],c.b[3]-c.b[1])<=.12&&(c.b[0]+c.b[2])/2>I.b[0]&&(c.b[0]+c.b[2])/2<I.b[2]&&(c.b[1]+c.b[3])/2>I.b[1]&&(c.b[1]+c.b[3])/2<I.b[3]))});
+        if(sk.length&&(r.w>sk[0].b[2]-sk[0].b[0]+.3||r.h>sk[0].b[3]-sk[0].b[1]+.3)){const inS=o=>sk.some(S=>o.b[0]>=S.b[0]-.01&&o.b[1]>=S.b[1]-.01&&o.b[2]<=S.b[2]+.01&&o.b[3]<=S.b[3]+.01);
+          const rest=g.filter(o=>!inS(o));sk.forEach(S=>{const sub=g.filter(o=>o.b[0]>=S.b[0]-.01&&o.b[1]>=S.b[1]-.01&&o.b[2]<=S.b[2]+.01&&o.b[3]<=S.b[3]+.01),r2=mk(sub);r2.t='slop';put(r2)});
+          if(rest.length){const r3=mk(rest);if(r3.t)put(r3);else group(rest,depth+1)}return}}
       put(r)})};
   group(C,0);
   /* ほかの器具の中に入っている物（カウンターの鉢など）は外す */

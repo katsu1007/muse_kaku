@@ -1,7 +1,7 @@
 /* 自前輪郭化（polygonize）と補足区画（supplementFaces）：幾何の基本と補足の規則 */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { polygonizeFaces, supplementFaces, overlapArea } from '../js/polygonize.js';
+import { polygonizeFaces, supplementFaces, overlapArea, segsWithoutClusters } from '../js/polygonize.js';
 
 /* 四角の輪郭線（x,y 左下・w,h 大きさ） */
 const sq = (x, y, w, h) => [[x, y, x + w, y], [x + w, y, x + w, y + h], [x + w, y + h, x, y + h], [x, y + h, x, y]];
@@ -135,4 +135,40 @@ test('補足区画：入力（線・区画・器具）を書き換えない', ()
   const before = JSON.stringify([segs, faces, fixtures]);
   supplementFaces({ segs, faces, fixtures });
   assert.equal(JSON.stringify([segs, faces, fixtures]), before);
+});
+
+/* 家具線の除外（segsWithoutClusters）：補足区画の線プール専用（wallzone 試行・2026-11-23） */
+test('家具線の除外：外形と本数が合う成分の線だけが外れ、部屋の輪は1つにまとまる', () => {
+  const room = sq(0, 0, 4, 3);            /* 部屋の壁（4本） */
+  const desk = sq(1.5, 1, 0.8, 0.8);      /* 中の机（4本・閉じた四角） */
+  const segs = [...room, ...desk];
+  const pool = segsWithoutClusters(segs, [{ b: [1.5, 1, 2.3, 1.8], n: 4 }]);
+  assert.equal(pool.length, 4);
+  assert.deepEqual(pool, room);
+  /* プール全体だと机の輪が別の面になるが、外すと部屋の面だけになる */
+  assert.equal(polygonizeFaces(segs).length, 2);
+  assert.equal(polygonizeFaces(pool).length, 1);
+});
+
+test('家具線の除外：外形が合う成分が無ければ何も外さない', () => {
+  const segs = [...sq(0, 0, 4, 3), ...sq(1.5, 1, 0.8, 0.8)];
+  assert.equal(segsWithoutClusters(segs, [{ b: [10, 10, 11, 11], n: 4 }]).length, 8);
+  assert.equal(segsWithoutClusters(segs, []).length, 8);
+  assert.equal(segsWithoutClusters(segs, null).length, 8);
+});
+
+test('家具線の除外：候補が1つだけなら本数が違ってもその成分を外す（試行の決め方）', () => {
+  const segs = [...sq(0, 0, 4, 3), ...sq(1.5, 1, 0.8, 0.8)];
+  const pool = segsWithoutClusters(segs, [{ b: [1.5, 1, 2.3, 1.8], n: 99 }]);
+  assert.equal(pool.length, 4);
+});
+
+test('家具線の除外：壁と端点を共有する線（成分が分かれない物）は巻き込まない', () => {
+  /* 机が壁の角と端点を共有していると壁と1つの成分になる。その場合は成分の外形が
+   * 机と一致しないので、机の外形を指定しても壁ごとには外れない */
+  const wall = sq(0, 0, 4, 3);
+  const deskTouch = [[4, 0, 4.8, 0], [4.8, 0, 4.8, 0.8], [4.8, 0.8, 4, 0.8]]; /* 壁の角 (4,0) を共有する机 */
+  const segs = [...wall, ...deskTouch];
+  const pool = segsWithoutClusters(segs, [{ b: [4, 0, 4.8, 0.8], n: 3 }]);
+  assert.equal(pool.length, segs.length);
 });

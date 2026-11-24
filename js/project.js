@@ -17,7 +17,7 @@ import { applyEdgeFix, revertEdgeFix } from './facerepair.js';
 import { createShapeIndex } from './fixshape.js';
 import { judgeRooms, ROOM_JUDGE } from './roomjudge.js';
 import { computeZones, splitFacesByLine, detectTableAreas } from './zones.js';
-import { supplementFaces, polygonizeFaces } from './polygonize.js';
+import { supplementFaces, polygonizeFaces, segsWithoutClusters } from './polygonize.js';
 import { extractDxfDims, checkDimensions, dimCheckFor } from './dxf-dims.js';
 import { estimateSymScale, symScaleFor } from './symscale.js';
 import { correctFixtureTypes } from './typefix.js';
@@ -420,6 +420,9 @@ function openSymEditor(entry, onDone) {
  * 机・椅子などの家具は、線の集まりから切り出した候補（d.furn）を形の特徴で判定し、検出・類似だけを足す。
  * 結果は図面ごとに覚える） */
 const symCache = new WeakMap();
+/* 補足区画の線プールから外す家具のカテゴリ（wallzone 試行・2026-11-23 で検証した6種だけ。
+ * 設備＝キッチン・洗濯設備や流し・SK は、開いた平面で仕切りの一部になることがあるため外さない） */
+const SUPP_FURN_CATS = new Set(['机・デスク', '椅子', 'ソファ', 'ベッド', 'ロッカー', '収納（棚・キャビネット）']);
 /* 根拠ボード（js/board.js・js/docs.js）からも同じ判定を読むため export する（中身は変えない） */
 export function symList(d) {
   const fx = (d && d.fixtures) || [];
@@ -1559,7 +1562,27 @@ function stepRooms(ctx) {
         if (cad) { try {
           const tb = detectTableAreas({ faces: res.plan.faces || [], texts: res.texts || [], fixtures: allFixtures, doors: res.doorList || [] }).boxes;
           const rb = ((p.drawing.analysis && p.drawing.analysis.regions) || []).filter(r => r.type === 'table' || r.type === 'title').map(r => r.box);
-          p.drawing.polyFaces = supplementFaces({ segs: res.plan.segs || [], faces: res.plan.faces || [], fixtures: allFixtures, texts: res.texts || [], doors: res.doorList || [], tableBoxes: [...tb, ...rb] });
+          /* 補足区画の線プールからだけ、辞書で「検出」になった家具（SUPP_FURN_CATS の6種）の線を
+           * 外す（wallzone 試行・2026-11-23：家具の線が部屋の中を細切れにするため。江南・大天・
+           * 日本モウルドで補足の断片が減り、家具の検出が無い図面では変化なし）。判定の材料と
+           * 決め方は試行と同一（素の判定→椅子文脈→最終判定。倍率1・自分の辞書は使わない＝
+           * symList の表示判定とは別に、試行で検証した決め方をそのまま使う）。器具・設備・
+           * 類似/不明は外さない。エンジン区画・ゾーン・部屋判定の入力は従来どおり全線のまま */
+          let suppSegs = res.plan.segs || [];
+          try {
+            const fu = p.drawing.furn || [];
+            const baseFu = fu.map(x => (x && x.b) ? classifyCluster(x, [], null, 1, false) : null);
+            let fctx = [];
+            try { fctx = buildChairContexts(fu, baseFu, { zones: p.drawing.zones || [], faces: res.plan.faces || [], fixtures: allFixtures, texts: res.texts || [] }); } catch (e3) { fctx = []; }
+            const targets = [];
+            fu.forEach((x, j) => {
+              if (!x || !x.b) return;
+              const v = fctx[j] ? classifyCluster(x, [], fctx[j], 1, false) : baseFu[j];
+              if (v && v.verdict === 'hit' && SUPP_FURN_CATS.has(v.category)) targets.push(x);
+            });
+            if (targets.length) suppSegs = segsWithoutClusters(suppSegs, targets);
+          } catch (e3) { console.warn('補足区画の家具線の除外に失敗', e3); }
+          p.drawing.polyFaces = supplementFaces({ segs: suppSegs, faces: res.plan.faces || [], fixtures: allFixtures, texts: res.texts || [], doors: res.doorList || [], tableBoxes: [...tb, ...rb] });
         } catch (e2) { console.warn('補足区画の作成に失敗', e2); p.drawing.polyFaces = []; } }
         if (cad && res.v2) { try { const P2 = { faces: res.v2.faces }; orderFacesOf(P2);
           /* 扉の無い開口は「区画の辺に壁の線が無い所」で決めるので、区画の形が壁の線に沿っていないと、辺のほとんどが開口になる。
