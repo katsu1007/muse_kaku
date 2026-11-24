@@ -1,0 +1,11 @@
+Test ID,Drawing type,Expected spaces,Dimensions / geometry,Expected area,Expected openings / symbols,Primary evaluation point
+"01","Rectangle","1","4000 x 3000","12.00 m2","door 800 mm","Basic room closure"
+"02","L-shape","1","6000 x 5000 minus 2000 x 2000 notch","26.00 m2","none","Concave polygon area"
+"03","Slanted wall","1","trapezoid: bottom 5000, top 4000, depth 3000","13.50 m2","none","Slanted edge and area"
+"04","Columns","1","7000 x 5000; 3 columns 500 x 500","35.00 m2 gross; columns 0.75 m2","none","Column detection and area policy"
+"05","Doors/windows","1","8000 x 5000","40.00 m2","2 doors 900; 3 windows 1500","Opening detection"
+"06","Three rooms","3","3000 x 6000 each","18.00 m2 each; 54.00 total","2 internal openings 900","Room segmentation"
+"07","Toilet/wash","2 zones","6000 x 4000","24.00 m2 total","1 WC, 1 urinal, 1 basin, 1 shower","Sanitary symbol recognition"
+"08","Electrical","1","8000 x 6000","48.00 m2","4 lights, 5 outlets, 2 switches","Layer/symbol counts"
+"09","Dense annotations","2 spaces","7200 x 4800 outer","34.56 m2 gross","store partition, furniture, notes","Separate dimensions/text from geometry"
+"10","Rough sketch","1 uncertain","approx 4000 x 3000","approx 12.0 m2","ambiguous 800 mm opening; 2 ambiguous marks","Detect uncertainty, avoid auto-confirm"
