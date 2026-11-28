@@ -209,13 +209,41 @@ export const FIX_WORDS = { toilet: ['便器', 'トイレ'], urinal: ['小便器'
  * 部屋の中の境目（となりの区画も同じ部屋）は数えない。ドアは幅×高さ（2.0m、天井が低い時は天井高−5cm）、扉の無い開口は幅×天井高 */
 export function roomOpenRuns(faceIds, plan, open) {
   const pip = (x, y, poly) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[i], b = poly[j]; if ((a[1] > y) !== (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]) c = !c; } return c; };
+  const hw = (plan && plan.hangWalls) || [];
   const out = [];
   faceIds.forEach(i => (open[i] || []).forEach(run => {
     const mx = (run.a[0] + run.b[0]) / 2, my = (run.a[1] + run.b[1]) / 2;
     const inner = [0.1, 0.2, 0.35].some(o => { const x = mx + run.n[0] * o, y = my + run.n[1] * o; return faceIds.some(j => { if (j === i) return false; const f = plan.faces.find(z => z.i === j); return f && pip(x, y, f.poly); }); });
-    if (!inner) out.push({ ty: run.ty, len: run.len });
+    if (inner) return;
+    /* 垂れ壁の区間（plan.hangWalls）に重なる扉の無い開口は hang（下がり寸法）を付けて返す。
+     * 数量側（calc.js）は、その区間を全高で引かず「長さ×下がり」を壁として数える */
+    const hang = run.ty === 'd' ? 0 : hangOfRun(run, hw);
+    out.push({ ty: run.ty, len: run.len, ...(hang > 0 ? { hang } : {}) });
   }));
   return out;
+}
+
+/* 垂れ壁の区間（[{a, b, drop}]）と開口ランが重なれば、下がり寸法（m）を返す。
+ * 条件：向きがほぼ同じ（12° 以内）・ランの中心が区間から 0.15m 以内・重なりがランの半分以上 */
+function hangOfRun(x, hw) {
+  if (!hw.length || !x.a || !x.b) return 0;
+  const ax = x.b[0] - x.a[0], ay = x.b[1] - x.a[1], al = Math.hypot(ax, ay);
+  if (!(al > 0)) return 0;
+  const ux = ax / al, uy = ay / al, mx = (x.a[0] + x.b[0]) / 2, my = (x.a[1] + x.b[1]) / 2;
+  for (const w of hw) {
+    if (!w || !w.a || !w.b || !(w.drop > 0)) continue;
+    const wx = w.b[0] - w.a[0], wy = w.b[1] - w.a[1], wl = Math.hypot(wx, wy);
+    if (!(wl > 0)) continue;
+    if (Math.abs((wx / wl) * uy - (wy / wl) * ux) > 0.21) continue;
+    const dx = wx, dy = wy;
+    let t = ((mx - w.a[0]) * dx + (my - w.a[1]) * dy) / (wl * wl);
+    t = Math.max(0, Math.min(1, t));
+    if (Math.hypot(w.a[0] + dx * t - mx, w.a[1] + dy * t - my) > 0.15) continue;
+    const tt = p => (p[0] - w.a[0]) * (wx / wl) + (p[1] - w.a[1]) * (wy / wl);
+    const ov = Math.min(Math.max(tt(x.a), tt(x.b)), wl) - Math.max(Math.min(tt(x.a), tt(x.b)), 0);
+    if (ov >= al * 0.5) return w.drop;
+  }
+  return 0;
 }
 
 /* 照明の自動配置：前のKAKUの並べ方（壁から60cm＋均等割り、細い所は器具の先との真ん中に一列、列そろえ、欠き込み・斜めの壁の手直し）を

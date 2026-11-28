@@ -73,7 +73,9 @@ export function roomGeom(room, opt = DEFAULTS) {
    * ドア：幅×高さ（2.0m、天井が低い時は天井高−5cm）／扉の無い開口：幅×天井高。巾木は開口の幅ぶん短く */
   const runs = !room.openOff && Array.isArray(room.openRuns) && room.openRuns.length ? room.openRuns : null;
   const dh = Math.min(2, h - 0.05);
-  const runA = runs ? runs.reduce((s, r) => s + Math.max(0, num(r.len)) * (r.ty === 'd' ? dh : h), 0) : 0;
+  /* 垂れ壁のある開口（r.hang＝天井からの下がり寸法）：全高は引かず、下がりぶんを壁として残す。
+   * 引くのは「高さ−下がり」だけ（垂れ壁の数量＝長さ×下がり。2026-11-28 村中さんの決定） */
+  const runA = runs ? runs.reduce((s, r) => s + Math.max(0, num(r.len)) * (r.ty === 'd' ? dh : Math.max(0, h - Math.min(Math.max(0, num(r.hang)), h))), 0) : 0;
   const runW = runs ? runs.reduce((s, r) => s + Math.max(0, num(r.len)), 0) : 0;
   /* 窓：寸法を入れた窓がある部屋は、その面積だけ引いて「窓（か所）」の数は使わない（前のKAKUと同じ。両方引くと引きすぎる） */
   const openings = (runs ? runA : doors * o.doorArea) + (winSized > 0 ? winSized : winCount * o.winArea);

@@ -100,6 +100,8 @@ function segsFor3D(d, plan) {
 export function toOld(p) {
   const d = p.drawing, plan = d.plan, ch0 = planCH(plan) || opts().ceilH;
   const P = { segs: segsFor3D(d, plan), dsegs: plan.dsegs || [], titles: plan.titles || [],
+    /* 垂れ壁の区間（注記から読み取り済み。plan の座標のまま渡し、旧ビルダーが天井から下がった壁として描く） */
+    hang: (plan.hangWalls || []).filter(w => w && w.a && w.b && w.drop > 0),
     faces: plan.faces.map((f, k) => ({ i: f.i, no: k + 1, name: f.name || '', area: f.area, peri: f.peri, ch: f.ch || 0, poly: f.poly })) };
   const rooms = p.rooms.filter(r => r.src === 'plan').map((r, k) => ({
     id: r.id, name: r.name, plan: true, faces: r.faces || [], ch: Number(r.h) > 0 ? Number(r.h) : ch0,
@@ -137,7 +139,8 @@ export function sheetProject(p, sh) {
   const ids = new Set(faces.map(f => f.i));
   const segIn = q => Array.isArray(q) && inB((q[0] + q[2]) / 2, (q[1] + q[3]) / 2);
   const ptIn = o => o && (Number.isFinite(o.x) ? inB(o.x, o.y) : true);
-  const plan2 = { ...plan, faces, segs: (plan.segs || []).filter(segIn), dsegs: (plan.dsegs || []).filter(segIn), titles: (plan.titles || []).filter(ptIn) };
+  const plan2 = { ...plan, faces, segs: (plan.segs || []).filter(segIn), dsegs: (plan.dsegs || []).filter(segIn), titles: (plan.titles || []).filter(ptIn),
+    hangWalls: (plan.hangWalls || []).filter(w => w && w.a && w.b && inB((w.a[0] + w.b[0]) / 2, (w.a[1] + w.b[1]) / 2)) };
   const d2 = { ...d, plan: plan2,
     fixtures: (d.fixtures || []).filter(x => x.b && inB((x.b[0] + x.b[2]) / 2, (x.b[1] + x.b[3]) / 2)),
     doors: (d.doors || []).filter(x => !x.c || inB(x.c[0], x.c[1])),

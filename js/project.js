@@ -21,6 +21,7 @@ import { supplementFaces, polygonizeFaces, segsWithoutClusters } from './polygon
 import { extractDxfDims, checkDimensions, dimCheckFor } from './dxf-dims.js';
 import { estimateSymScale, symScaleFor, scaleCheck, scaleTargetFor, userCoef, scaleGeomBy } from './symscale.js';
 import { correctFixtureTypes } from './typefix.js';
+import { analyzeHangWalls } from './hangwall.js';
 import { USES, DEF_LM, needCount, pitchFor, luxOf, wirePlan, cableQty, pip, polyD } from './lighting.js';
 /* iPhone・iPad では、選べるファイルの種類を絞ると .jww・.jwc・.dxf が灰色になって選べない（iPhone がこの拡張子を知らないため）。
    なので iPhone・iPad では絞らない。何を選んでも、読み込む時に拡張子で見分けるので困らない */
@@ -692,7 +693,19 @@ function scaleBlock(d) {
     list = `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)"><div class="row"><b class="small">要確認</b><span class="small muted">タップすると、図面の場所へ飛んで直せます</span></div>
     <button class="btn sm" data-scalecheck="1" style="justify-content:flex-start;gap:8px;min-height:40px;width:100%;text-align:left;margin-top:6px"><span>縮尺・換算係数</span>${val}<span class="muted" style="flex:1">${why}</span></button></div>`;
   }
-  return line + list;
+  /* 垂れ壁（js/hangwall.js）：結び付いた物は内訳を出し、場所が決められなかった物は
+   * 要確認リストに入れる（タップで注記の場所へ飛ぶ。直す物は無いので編集は開かない） */
+  const hz = d.hangNotes || null;
+  let hangRows = '';
+  if (hz && hz.linked && hz.linked.length) {
+    hangRows = hz.linked.map(w => `<div class="small" style="margin-top:6px">垂れ壁（${esc(w.text)}）：長さ ${w.len}m × 下がり ${Math.round(w.drop * 1000)}mm ＝ <b>${w.area}㎡</b> を壁として数えています<span class="muted">（下の開口は全高では引いていません）</span></div>`).join('');
+  }
+  if (hz && hz.unresolved && hz.unresolved.length) {
+    const btns = hz.unresolved.map((w, k) => `<button class="btn sm" data-hangcheck="${k}" style="justify-content:flex-start;gap:8px;min-height:40px;width:100%;text-align:left;margin-top:6px"><span>垂れ壁</span><b style="color:var(--bad)">場所が決められませんでした</b><span class="muted" style="flex:1">「${esc(w.text)}」${esc(w.reason)}</span></button>`).join('');
+    if (list) list = list.slice(0, list.length - 6) + btns + '</div>';
+    else list = `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)"><div class="row"><b class="small">要確認</b><span class="small muted">タップすると、図面の場所へ飛びます</span></div>${btns}</div>`;
+  }
+  return line + hangRows + list;
 }
 
 function dimSummary(d) {
@@ -1101,6 +1114,9 @@ function stepRooms(ctx) {
     (d.walls || []).forEach(w => { if (w.pts && w.pts.length > 1) h += `<polyline points="${w.pts.map(q => `${q[0]},${-q[1]}`).join(' ')}" fill="none" stroke="${w.itemId ? '#ff6b6b' : '#5ab7ff'}" stroke-width="${lw * 7}" stroke-linecap="round" stroke-linejoin="round" opacity=".75"/>`; });
     if (mode === 'wall' && wpts.length) { h += `<polyline points="${wpts.map(q => `${q[0]},${-q[1]}`).join(' ')}" fill="none" stroke="var(--accent)" stroke-width="${lw * 7}" stroke-linecap="round" stroke-linejoin="round"/>`; wpts.forEach(q => { h += `<circle cx="${q[0]}" cy="${-q[1]}" r="${lw * 6}" fill="var(--accent)"/>`; }); }
     (d.hatsu || []).forEach(x => { if (!x.rect) return; const [a, b, c, e] = x.rect; h += `<rect x="${a}" y="${-e}" width="${c - a}" height="${e - b}" fill="#ff8a3d" fill-opacity=".18" stroke="#ff8a3d" stroke-width="${lw * 3}" stroke-dasharray="${lw * 6} ${lw * 4}"/>`; });
+    /* 垂れ壁（注記から読み取って開口に結び付いた区間）：紫の太線とラベルで出す */
+    ((plan && plan.hangWalls) || []).forEach(w => { if (!w || !w.a || !w.b) return; const mx = (w.a[0] + w.b[0]) / 2, my = (w.a[1] + w.b[1]) / 2;
+      h += `<line x1="${w.a[0]}" y1="${-w.a[1]}" x2="${w.b[0]}" y2="${-w.b[1]}" stroke="#b26bff" stroke-width="${lw * 7}" stroke-linecap="round" opacity=".8"/><text x="${mx}" y="${-my}" font-size="${lw * 11}" text-anchor="middle" dominant-baseline="central" fill="#b26bff" font-weight="800">垂れ壁</text>`; });
     if (cutA) h += `<circle cx="${cutA[0]}" cy="${-cutA[1]}" r="${lw * 6}" fill="var(--accent)"/>`;
     if (zsplit && zsplit.pts.length) { h += `<polyline points="${zsplit.pts.map(q => `${q[0]},${-q[1]}`).join(' ')}" fill="none" stroke="var(--accent)" stroke-width="${lw * 7}" stroke-linecap="round" stroke-linejoin="round"/>`; zsplit.pts.forEach(q => { h += `<circle cx="${q[0]}" cy="${-q[1]}" r="${lw * 6}" fill="var(--accent)"/>`; }); }
     if ((d.lights || []).length || panelsOf(d).length || (d.outlets || []).length || (d.switches || []).length) {
@@ -1628,6 +1644,13 @@ function stepRooms(ctx) {
         } catch (e2) { console.warn('器具の形の取り出しに失敗', e2); } }
         /* 机・椅子などの家具：線の集まりから形の候補を切り出して覚える（判定はシンボル辞書。器具・見積の数字は変えない） */
         if (cad) { try { p.drawing.furn = detectFurniture(res.plan.segs || [], allFixtures, res.doorList || []); } catch (e2) { console.warn('家具の検出に失敗', e2); p.drawing.furn = []; } }
+        /* 垂れ壁：注記（「上部：垂れ壁 H=600」など）と扉の無い開口を結び付けて、区間と下がり寸法を覚える。
+         * 数量への反映は部屋を作る時（roomOpenRuns が plan.hangWalls を照合し、calc が長さ×下がりで数える）。
+         * 結び付きが曖昧な物は決め打ちせず、要確認リストに出す（drawing.hangNotes） */
+        if (cad) { try { const hz = analyzeHangWalls({ texts: res.texts || [], open: res.open || {}, faces: res.plan.faces || [] });
+          p.drawing.plan.hangWalls = hz.linked.map(w => ({ a: w.a, b: w.b, drop: w.drop }));
+          p.drawing.hangNotes = hz;
+        } catch (e2) { console.warn('垂れ壁の読み取りに失敗', e2); p.drawing.hangNotes = { linked: [], unresolved: [] }; } }
         /* シンボルの大きさの自動補正：寸法の答え合わせと、拾った器具・家具の候補から倍率を推定して覚える。
          * 効くのは辞書の寸法判定だけ（図面の線・区画・部屋・見積は変えない）。証拠が弱い時は補正なし（factor 1） */
         if (cad) { try { p.drawing.symScale = estimateSymScale({ dimCheck, fixtures: allFixtures, clusters: p.drawing.furn || [] }); } catch (e2) { console.warn('シンボルの大きさの推定に失敗', e2); } }
@@ -1772,6 +1795,10 @@ function stepRooms(ctx) {
       if (view && tg) { window.scrollTo({ top: 0, behavior: 'smooth' }); view.zoomTo(tg); }
       const done = () => { const dimBox = body.querySelector('#dwgDim'); if (dimBox) dimBox.innerHTML = dimSummary(p.drawing); const symBox = body.querySelector('#dwgSym'); if (symBox) symBox.innerHTML = symSummary(p.drawing, symSel); paintSel(); };
       setTimeout(() => openScaleEditor(p, done), view && tg ? 350 : 0);
+      return; }
+    const hgb = e.target.closest('[data-hangcheck]');
+    if (hgb) { const w = ((p.drawing.hangNotes || {}).unresolved || [])[+hgb.dataset.hangcheck];
+      if (w && view) { window.scrollTo({ top: 0, behavior: 'smooth' }); view.zoomTo([w.x - 1.5, w.y - 1.5, w.x + 1.5, w.y + 1.5]); }
       return; }
     const sreg = e.target.closest('[data-symreg]');
     if (sreg) { const s = symList(p.drawing).find(q => q.k === +sreg.dataset.symreg);
