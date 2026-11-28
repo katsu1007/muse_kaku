@@ -5,8 +5,9 @@
 import { opts } from './app.js';
 import { oldType } from './legacy.js';
 import { planCH } from './drawing.js';
-import { lightWires } from './project.js';
+import { lightWires, typeFixMap } from './project.js';
 import { pip } from './lighting.js';
+import { detectFurniture } from './furndetect.js';
 
 const clone = o => JSON.parse(JSON.stringify(o));
 const DEMO = /解体|撤去|はがし|剥がし|斫り|はつり/;
@@ -24,9 +25,81 @@ function finishes(p, r) {
   return o;
 }
 
+/* 3Dの壁にしない線：旧3Dは渡された線を全部「壁」として天井高まで立てるので、
+ * 家具クラスタ（drawing.furn）と器具の箱の中（ふちの上も含む）にすっぽり入る線は、
+ * 渡す前に外す（江南では全線の約27%が家具の中の線で、ロッカーや植栽が天井までの
+ * 壁になっていた）。家具の輪郭線は箱のふちの上に乗っているので、ふちも「中」に
+ * 入れる（丸め誤差の 5mm だけ広げて判定）。ただし、区画のふち（面の辺）に重なる
+ * 線は本物の壁なので必ず残す。
+ * ここで変えるのは3Dへ渡す写しだけで、2Dの数字・保存には一切影響しない */
+function segsFor3D(d, plan) {
+  const segs = plan.segs || [];
+  if (!segs.length) return segs;
+  let furn = d.furn;
+  if (!Array.isArray(furn)) { try { furn = detectFurniture(segs, d.fixtures || [], d.doors || []); } catch (e) { furn = []; } }
+  const boxes = [];
+  (furn || []).forEach(c => { if (c && c.b) boxes.push(c.b); });
+  (d.fixtures || []).forEach(x => { if (x && x.b) boxes.push(x.b); });
+  if (!boxes.length) return segs;
+  /* 近い箱どうし（すき間 20cm まで）は1つの領域にまとめる。植栽のプランターの
+   * ように1つずつでは小さい箱が並ぶ帯は、帯を貫く線がどの箱にも入りきらないため、
+   * 帯全体を1つの領域として扱う（江南の植栽レールがこの形だった） */
+  const norm = b => [Math.min(b[0], b[2]), Math.min(b[1], b[3]), Math.max(b[0], b[2]), Math.max(b[1], b[3])];
+  const regions = [];
+  {
+    const NB = boxes.map(norm);
+    const ex = NB.map(b => [b[0] - 0.10, b[1] - 0.10, b[2] + 0.10, b[3] + 0.10]);
+    const used = new Array(NB.length).fill(false);
+    for (let i = 0; i < NB.length; i++) {
+      if (used[i]) continue;
+      used[i] = true;
+      let r = NB[i].slice(), e = ex[i].slice(), grew = true;
+      while (grew) { grew = false; for (let j = 0; j < NB.length; j++) { if (used[j]) continue; const o = ex[j];
+        if (o[0] <= e[2] && o[2] >= e[0] && o[1] <= e[3] && o[3] >= e[1]) { used[j] = true; grew = true;
+          r = [Math.min(r[0], NB[j][0]), Math.min(r[1], NB[j][1]), Math.max(r[2], NB[j][2]), Math.max(r[3], NB[j][3])];
+          e = [Math.min(e[0], o[0]), Math.min(e[1], o[1]), Math.max(e[2], o[2]), Math.max(e[3], o[3])]; } } }
+      regions.push(r);
+    }
+  }
+  const EP = 0.005;
+  const inner = regions.map(b => [b[0] - EP, b[1] - EP, b[2] + EP, b[3] + EP]);
+  if (!inner.length) return segs;
+  const inIdx = (x, y) => { for (let i = 0; i < inner.length; i++) { const b = inner[i]; if (x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]) return i; } return -1; };
+  /* 区画のふち（面の辺）をマス目で引けるようにする */
+  const edges = [];
+  (plan.faces || []).forEach(f => { if (!f.poly || f.poly.length < 2) return; for (let i = 0; i < f.poly.length; i++) { const a = f.poly[i], b = f.poly[(i + 1) % f.poly.length]; if (a[0] !== b[0] || a[1] !== b[1]) edges.push([a[0], a[1], b[0], b[1]]); } });
+  const CELL = 0.5, egrid = new Map();
+  edges.forEach((e, k) => {
+    const x0 = Math.floor(Math.min(e[0], e[2]) / CELL), x1 = Math.floor(Math.max(e[0], e[2]) / CELL);
+    const y0 = Math.floor(Math.min(e[1], e[3]) / CELL), y1 = Math.floor(Math.max(e[1], e[3]) / CELL);
+    for (let gx = x0; gx <= x1; gx++) for (let gy = y0; gy <= y1; gy++) { const key = gx + ':' + gy; let a = egrid.get(key); if (!a) { a = []; egrid.set(key, a); } a.push(k); }
+  });
+  /* 線が区画のふちに重なるか（両端が辺の直線から 2cm 以内で、重なる部分がある）。
+     辺の候補は線の上5点（両端・1/4・中点・3/4）の近くのマスから集める：
+     長い線が短い辺と一部だけ重なる場合、中点だけでは辺にたどり着けないため */
+  const onEdge = s => {
+    const cand = new Set();
+    for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+      const cx = Math.floor((s[0] + (s[2] - s[0]) * t) / CELL), cy = Math.floor((s[1] + (s[3] - s[1]) * t) / CELL);
+      for (let gx = cx - 1; gx <= cx + 1; gx++) for (let gy = cy - 1; gy <= cy + 1; gy++) {
+        const a = egrid.get(gx + ':' + gy); if (a) a.forEach(k => cand.add(k));
+      }
+    }
+    for (const k of cand) {
+      const e = edges[k], dx = e[2] - e[0], dy = e[3] - e[1], L = Math.hypot(dx, dy); if (L < 1e-9) continue;
+      if (Math.abs((s[0] - e[0]) * dy - (s[1] - e[1]) * dx) / L > 0.02 || Math.abs((s[2] - e[0]) * dy - (s[3] - e[1]) * dx) / L > 0.02) continue;
+      const t1 = ((s[0] - e[0]) * dx + (s[1] - e[1]) * dy) / L, t2 = ((s[2] - e[0]) * dx + (s[3] - e[1]) * dy) / L;
+      if (Math.min(t1, t2) < L - 0.01 && Math.max(t1, t2) > 0.01) return true;
+    }
+    return false;
+  };
+  const out = segs.filter(s => { const i = inIdx(s[0], s[1]); return i < 0 || inIdx(s[2], s[3]) !== i || onEdge(s); });
+  return out.length === segs.length ? segs : out;
+}
+
 export function toOld(p) {
   const d = p.drawing, plan = d.plan, ch0 = planCH(plan) || opts().ceilH;
-  const P = { segs: plan.segs, dsegs: plan.dsegs || [], titles: plan.titles || [],
+  const P = { segs: segsFor3D(d, plan), dsegs: plan.dsegs || [], titles: plan.titles || [],
     faces: plan.faces.map((f, k) => ({ i: f.i, no: k + 1, name: f.name || '', area: f.area, peri: f.peri, ch: f.ch || 0, poly: f.poly })) };
   const rooms = p.rooms.filter(r => r.src === 'plan').map((r, k) => ({
     id: r.id, name: r.name, plan: true, faces: r.faces || [], ch: Number(r.h) > 0 ? Number(r.h) : ch0,
@@ -40,7 +113,12 @@ export function toOld(p) {
   const W = lightWires(p), link = {};
   W.sws.forEach(s0 => places.push({ id: 'sw_' + s0.key, item: 'e-sw1', where: 'pt', p: s0.l, count: 1 }));
   Object.entries(W.assign || {}).forEach(([lk, sk]) => { link[lk + ':0'] = 'sw_' + sk + ':0'; });
-  const fix = { fx: (d.fixtures || []).map((x, k) => ({ id: 'f' + k, t: oldType(x.t), b: x.b, back: x.back || '' })), doors: (d.doors || []).map(x => ({ c: x.c, m: x.m, r: x.r })) };
+  /* 器具の種類は、2Dの表示と同じタイプ補正（typefix）を通してから渡す。
+   * 生の種類のままだと、机を浴槽と誤判定した物が3Dでだけ本物の浴槽になる
+   * （江南の待合室の机＋椅子。2Dではルール4で「器具ではない物」に直っている） */
+  let TF = [];
+  try { TF = typeFixMap(d) || []; } catch (e) { TF = []; }
+  const fix = { fx: (d.fixtures || []).map((x, k) => ({ id: 'f' + k, t: oldType((TF[k] && TF[k].shown) || x.t), b: x.b, back: x.back || '' })), doors: (d.doors || []).map(x => ({ c: x.c, m: x.m, r: x.r })) };
   const cur = { id: '__k3d', name: p.name || '', rooms, places, win: {}, win3d: clone(d.win3d || []), openAuto: true,
     wire: { on: (d.lights || []).length > 0 || (d.outlets || []).length > 0, sw: 'e-sw1', cL: 'e-v16-2', cO: 'e-v20-2', extra: d.wireExtra ?? 10, out: (d.outlets || []).length > 0, link } };
   /* 配線の線と長さは新しい画面の計算（ブースは外の部屋のスイッチ、置いたスイッチ・つなぎ替え込み）をそのまま見せる */

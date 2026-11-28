@@ -69,6 +69,10 @@ export function planView(box, plan, opt = {}) {
   if (!isFinite(minX)) { minX = minY = 0; maxX = maxY = 1; }
   const W = Math.max(1, maxX - minX), H = Math.max(1, maxY - minY), pad = Math.max(W, H) * 0.04;
   const base = [minX - pad, -maxY - pad, W + pad * 2, H + pad * 2];   // y は上向きなので反転して描く
+  /* 補足区画（線から起こした区画。opt.extraFaces、i は 'p1' のような文字列）：エンジンの区画と
+   * 重ならない所にだけあるので、タップ候補に足してもエンジン区画の当たり方は変わらない */
+  const extraFaces = (opt.extraFaces || []).filter(f => f && f.poly && f.poly.length >= 3);
+  const allFaces = extraFaces.length ? plan.faces.concat(extraFaces) : plan.faces;
   /* 描き直しても、同じ図面なら前の拡大・位置のまま（opt.keep＝前の view.keep()） */
   let vb = opt.keep && opt.keep.base && opt.keep.base.every((v, k) => Math.abs(v - base[k]) < 1e-6) ? opt.keep.vb.slice() : base.slice();
   const lw = Math.max(W, H) / 900;
@@ -146,6 +150,10 @@ export function planView(box, plan, opt = {}) {
       const fill = s ? 'var(--accent)' : o != null ? roomColor(o) : m && m.s === 'out' && !m.hide ? '#8a93a0' : 'transparent';
       const op = s ? 0.45 : o != null ? 0.22 : m && m.s === 'out' && !m.hide ? 0.32 : 0;
       return `<polygon data-i="${f.i}" points="${f.poly.map(p => p[0] + ',' + -p[1]).join(' ')}" fill="${fill}" fill-opacity="${op}" stroke="${s ? 'var(--accent)' : m && m.s === 'hold' ? 'var(--warn)' : 'none'}" ${m && m.s === 'hold' ? `stroke-dasharray="${lw * 6} ${lw * 4}"` : ''} stroke-width="${lw * 2.5}" style="cursor:pointer"/>`;
+    }).join('') + extraFaces.map(f => {
+      /* 補足区画：ふだんは塗らない（見分けの色は「室」の層で出ている）。選んだ時だけエンジン区画と同じ強調にする */
+      const s = sel.has(f.i);
+      return `<polygon data-i="${f.i}" points="${f.poly.map(p => p[0] + ',' + -p[1]).join(' ')}" fill="${s ? 'var(--accent)' : 'transparent'}" fill-opacity="${s ? 0.45 : 0}" stroke="${s ? 'var(--accent)' : 'none'}" stroke-width="${lw * 2.5}" style="cursor:pointer"/>`;
     }).join('');
     svg.querySelector('.labels').innerHTML = plan.faces.map(f => {
       const o = owner.get(f.i), s = sel.has(f.i);
@@ -246,14 +254,18 @@ export function planView(box, plan, opt = {}) {
   /* その点を含む区画のうち一番小さい物（図枠の内側のような大きい区画が、上に重なっていても小さい方を選ぶ） */
   /* ほかの区画を2つ以上中に含む区画（図枠の内側・建物の外まわり）はタップで選ばない（区画の無い所を押すと図面全体が選ばれていた）。区画の一覧からは選べる */
   const pin = (x, y, P) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { if (((P[i][1] > y) !== (P[j][1] > y)) && x < (P[j][0] - P[i][0]) * (y - P[i][1]) / (P[j][1] - P[i][1]) + P[i][0]) c = !c; } return c; };
-  const wrapM = new Map(), wraps = (z) => { if (!wrapM.has(z.i)) { let k = 0; for (const o of plan.faces) { if (o !== z && o.area < z.area && pin(o.cx, o.cy, z.poly) && ++k >= 2) break; } wrapM.set(z.i, k >= 2); } return wrapM.get(z.i); };
-  const faceAt0 = (x, y) => { let best = null; for (const z of plan.faces) { const P = z.poly; if (!P || P.length < 3 || (best && z.area >= best.area)) continue; if (!pin(x, y, P) || wraps(z)) continue; best = z; } return best; };
+  /* wraps の判定はエンジン区画どうしだけで数える（補足区画の重心まで数えると、
+   * 今まで選べていた区画が選べなくなる）。補足区画自身には wraps をかけない：
+   * 部屋サイズの補足が小さなエンジン区画の重心を含むのは普通のことで、除外すると
+   * その補足の中心がタップできなくなる（大天で実測）。小さい方優先はそのまま効く */
+  const wrapM = new Map(), wraps = (z) => { if (typeof z.i === 'string') return false; if (!wrapM.has(z.i)) { let k = 0; for (const o of plan.faces) { if (o !== z && o.area < z.area && pin(o.cx, o.cy, z.poly) && ++k >= 2) break; } wrapM.set(z.i, k >= 2); } return wrapM.get(z.i); };
+  const faceAt0 = (x, y) => { let best = null; for (const z of allFaces) { const P = z.poly; if (!P || P.length < 3 || (best && z.area >= best.area)) continue; if (!pin(x, y, P) || wraps(z)) continue; best = z; } return best; };
   /* どの区画にも入らない所（机・棚のかたまりの中など）を押した時：上下左右に見て、8m 以内で最初に当たる区画が3方向以上で同じなら、その区画（まわりを囲んでいる部屋）を選ぶ。4方向とも何かの区画に当たれば、いちばん近い区画。建物の外を押した時は選ばない */
   const faceAround = (x, y) => {
     const dist = [];
     const hit = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy], di) => {
       let best = null, bd = 8;
-      for (const z of plan.faces) { const P = z.poly; if (!P || P.length < 3 || wraps(z)) continue;
+      for (const z of allFaces) { const P = z.poly; if (!P || P.length < 3 || wraps(z)) continue;
         for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const a = P[j], b = P[i];
           let t;
           if (dx) { if ((a[1] > y) === (b[1] > y)) continue; const xx = a[0] + (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]); t = (xx - x) * dx; }

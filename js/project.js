@@ -118,10 +118,15 @@ function refresh(p, step) {
       <span class="n">${done ? icon('check') : err ? '!' : s.n}</span><span><b>${s.t}</b><small>${err ? `要確認 ${errs}` : s.s}</small></span></a>`;
   }).join('');
   $$('.step .n svg').forEach(s => { s.style.width = '16px'; s.style.height = '16px'; });
-  /* 部屋のチップ */
+  /* 部屋の合計（カードの頭に出す帯。中身の数字は今までと同じ） */
   p.rooms.forEach(r => {
     const g = roomGeom(r, o);
-    set('room:' + r.id, (g.openAuto ? `<span class="chip" style="border-color:var(--info)">図面のドア ${g.openAuto.doors}・開口 ${g.openAuto.gaps} <b>−${fmt(g.openAuto.area)}</b>㎡</span>` : '') + `<span class="chip">床 <b>${fmt(g.floor)}</b>㎡</span><span class="chip">壁 <b>${fmt(g.wall)}</b>㎡</span><span class="chip">天井 <b>${fmt(g.ceil)}</b>㎡</span><span class="chip">周り <b>${fmt(g.perim)}</b>m</span><span class="chip">巾木 <b>${fmt(g.base)}</b>m</span>${Number(r.h) > 0 ? `<span class="chip">天井高 <b>${fmt(g.h)}</b>m</span>` : `<span class="chip" style="border-color:var(--warn);color:var(--warn)" title="天井高を入れていないので、標準の高さで壁の面積を計算しています">天井高 <b>${fmt(g.h)}</b>m（標準のまま・未入力）</span>`}`);
+    const rt = (lab, v, u, cls = '') => `<span class="rt${cls ? ' ' + cls : ''}"><i>${lab}</i><b>${v}</b><u>${u}</u></span>`;
+    set('room:' + r.id, (g.openAuto ? `<span class="rt open"><i>図面の開口</i><span class="rtx">ドア ${g.openAuto.doors}・開口 ${g.openAuto.gaps}</span><b>−${fmt(g.openAuto.area)}</b><u>㎡</u></span>` : '')
+      + rt('床', fmt(g.floor), '㎡') + rt('壁', fmt(g.wall), '㎡') + rt('天井', fmt(g.ceil), '㎡')
+      + rt('周り', fmt(g.perim), 'm', 'sub') + rt('巾木', fmt(g.base), 'm', 'sub')
+      + (Number(r.h) > 0 ? rt('天井高', fmt(g.h), 'm', 'sub')
+        : `<span class="rt sub warn" title="天井高を入れていないので、標準の高さで壁の面積を計算しています"><i>天井高</i><b>${fmt(g.h)}</b><u>m</u><em>標準のまま・未入力</em></span>`));
   });
   /* 明細の金額 */
   let mItems = null;
@@ -211,7 +216,7 @@ function stepInfo({ p, body, refresh }) {
 function finChips(p, r) {
   const f = currentFin(p, r.id), M = masterItems(), nm = id => (M.find(i => i.id === id) || {}).name || '';
   const list = SLOTS.filter(s => f[s.k]).map(s => `<span class="chip">${s.part}${s.role ? s.role === '仕上げ' ? '' : s.role : ''} <b>${esc(nm(f[s.k]))}</b></span>`);
-  return `<div class="chips" style="margin-bottom:8px">${list.length ? list.join('') : `<span class="small muted">仕上げはまだです。「仕上げ」で床・壁・天井・巾木を選べます。</span>`}</div>`;
+  return `<div class="chips" style="margin:0 0 10px">${list.length ? list.join('') : `<span class="small muted">仕上げはまだです。「仕上げ」で床・壁・天井・巾木を選べます。</span>`}</div>`;
 }
 function roomCard(r, i, p) {
   const free = r.shape === 'free';
@@ -221,6 +226,7 @@ function roomCard(r, i, p) {
       <button class="btn sm" data-act="roomFin">仕上げ</button>
       <button class="iconbtn" data-act="dupRoom" title="同じ部屋をもう1つ">${icon('copy')}</button>
       <button class="iconbtn" data-act="delRoom" title="この部屋を消す">${icon('trash')}</button></div>
+    <div class="rtot" data-out="room:${r.id}"></div>
     ${finChips(p, r)}
     ${r.src === 'plan' && r.holes && r.holes.area > 0 ? `<div class="row small" style="margin-bottom:8px;gap:8px;flex-wrap:wrap;align-items:center"><span class="${r.noHoles ? 'muted' : ''}">机・棚などで囲まれた所 ${r.holes.area}㎡ を床に${r.noHoles ? '足していません' : '足しています（図面では部屋の色で塗っています）'}</span><button class="btn sm" data-act="holeToggle" style="min-height:36px">${r.noHoles ? '床に足す' : '足さない'}</button></div>` : ''}
     <div class="row" style="margin-bottom:10px"><span class="small muted">形</span><div class="seg"><button data-shape="rect" class="${free ? '' : 'on'}">四角（幅×奥行）</button><button data-shape="free" class="${free ? 'on' : ''}">面積で入れる（L字など）</button></div></div>
@@ -247,7 +253,6 @@ function roomCard(r, i, p) {
         <div><button class="btn sm" data-act="addWin">${icon('plus')}窓を足す</button></div></div>
     </details>
     ${(r.openRuns || []).length ? `<label class="row small muted" style="gap:8px;margin-top:10px"><input type="checkbox" data-open-toggle ${r.openOff ? '' : 'checked'} style="width:20px;height:20px">図面で見つけたドア・開口を壁の面積から引く（引く時は、上の「ドア」の数は使いません）</label>` : ''}
-    <div class="chips" data-out="room:${r.id}"></div>
   </div>`;
 }
 
@@ -965,6 +970,7 @@ function snapPt(plan, x, y, tol) {
 function stepRooms(ctx) {
   const { p, body, refresh } = ctx;
   const sel = new Set();
+  const supSel = new Set();   // 補足区画（線から起こした区画）の選択。部屋にはできないので、エンジン区画の sel とは分けて持つ
   let view = null;
   let mode = 'room', fsel = -1, symSel = -1, addAt = null, cutA = null, ltool = 'light', linkSel = null;
   let zoneSel = '', zsplit = null;   // ゾーン分け：選んでいるゾーン／線で分ける途中（{id, pts}）
@@ -1278,7 +1284,9 @@ function stepRooms(ctx) {
     const fl = body.querySelector('#dwgFaces');
     if (fl) fl.innerHTML = [...p.drawing.plan.faces].sort((a, b) => a.no - b.no).map(f => `<button data-face="${f.i}" class="${sel.has(f.i) ? 'on' : ''} ${own.has(f.i) && !sel.has(f.i) ? 'used' : ''}">区画${f.no}${f.name ? ' ' + esc(f.name) : ''} ${Math.round(f.area * 100) / 100}㎡</button>`).join('');
     const bar = body.querySelector('#dwgBar');
-    if (bar) bar.innerHTML = sel.size
+    if (bar && supSel.size && !sel.size) { const pf = (p.drawing.polyFaces || []).find(f => f.i === [...supSel][0]);
+      bar.innerHTML = `<span class="small"><b>補足区画${pf ? ' ' + String(pf.i).slice(1) : ''}</b>${pf ? `（${Math.round(pf.area * 100) / 100}㎡）` : ''}を選んでいます。区画として拾えなかった床を、図面の線から起こした区画です。部屋の見分けには使われますが、部屋にはできません。</span><span class="spacer"></span><button class="btn ghost" data-act="selClear">選ぶのをやめる</button>`; }
+    else if (bar) bar.innerHTML = sel.size
       ? `<span class="small"><b>${sel.size} 区画</b>を選んでいます${selGeo ? `（床 ${Math.round((selGeo.area - (selGeo.holes && !holesOn ? selGeo.holes.area : 0)) * 100) / 100}㎡）` : ''}。続けてタップで足す・もう一度で外す。</span>${sel.size === 1 && (p.drawing.faceFix || {})[[...sel][0]] ? '<span class="pill info">辺を手直し済み</span>' : ''}${selGeo && selGeo.holes ? `<label class="row small" style="gap:6px;width:100%;cursor:pointer"><input type="checkbox" data-holes ${holesOn ? 'checked' : ''} style="width:20px;height:20px">中の机・棚などで囲まれた所 ${selGeo.holes.area}㎡ も床に入れる（図面で橙に塗った所）</label>` : ''}<span class="spacer"></span><button class="btn primary" data-act="mkOne">${icon('check')}終了：1部屋にする</button>${sel.size > 1 ? `<button class="btn" data-act="mkEach">1区画ずつ部屋にする</button>` : ''}<button class="btn" data-act="selSame" title="選んだ区画と同じ広さ・同じ周りの長さの区画（トイレのブースなど）を、まとめて選びます">同じ大きさの区画も選ぶ</button>${[...sel].some(i => own.has(i)) ? `<button class="btn" data-act="unassign">部屋から外す</button>` : ''}<button class="btn" data-act="faceJoin" title="棚や机で割れた小さい区画を、接している長さがいちばん長い隣の区画（部屋）の床に入れます">隣の部屋にまとめる</button><button class="btn" data-act="faceOff" title="部屋ではない所（表・家具・外など）を、灰色にして数えないようにします">区画ではない</button>${sel.size === 1 ? `<button class="btn" data-act="faceFix" title="壁の段差などを区画の辺が読み取れていない時、この区画の辺だけを、図面の実線に沿うように直します（直せる所が無い時は、何も変わりません）">辺を実線に直す</button>` : ''}${[...sel].some(i => (p.drawing.faceOff || {})[i] || (p.drawing.faceJoin || {})[i] != null || (p.drawing.faceFix || {})[i]) ? `<button class="btn" data-act="faceBack">元に戻す</button>` : ''}<button class="btn ghost" data-act="selClear">選ぶのをやめる</button>`
       : `<span class="small muted">部屋にする区画を順番にタップして、選び終わったら「終了」。そのまま床・壁・天井の仕上げを決められます。</span><span class="spacer"></span><button class="btn sm" data-act="selRest">まだ部屋にしていない区画を全部選ぶ</button>`;
   };
@@ -1427,7 +1435,9 @@ function stepRooms(ctx) {
     if (p.drawing && p.drawing.plan) {
       view = planView(body.querySelector('#dwgView'), p.drawing.plan, {
         keep: keepV,
-        selected: () => sel, owner, fixtures: fxDisplayList, symbols: () => symList(p.drawing).map(s => ({ b: s.b, color: SYM_VERDICTS[s.verdict].color, label: s.verdict === 'hit' ? s.category : s.verdict === 'near' ? '類似' : '不明', on: s.k === symSel })), roomJudge: () => roomJudgeEntries(p.drawing), zones: () => zoneEntries(p.drawing, zoneSel), bg: p.drawing.bg && p.sketch && p.sketch.img ? { ...p.sketch.img, s: p.drawing.bg.s } : null, fixSel: () => (mode === 'fix' ? fsel : -1), mode: () => mode, fixG: p.drawing.fixG || '', fixGd: p.drawing.fixGd || '',
+        selected: () => (supSel.size ? new Set([...sel, ...supSel]) : sel), owner, fixtures: fxDisplayList, symbols: () => symList(p.drawing).map(s => ({ b: s.b, color: SYM_VERDICTS[s.verdict].color, label: s.verdict === 'hit' ? s.category : s.verdict === 'near' ? '類似' : '不明', on: s.k === symSel })), roomJudge: () => roomJudgeEntries(p.drawing), zones: () => zoneEntries(p.drawing, zoneSel), bg: p.drawing.bg && p.sketch && p.sketch.img ? { ...p.sketch.img, s: p.drawing.bg.s } : null, fixSel: () => (mode === 'fix' ? fsel : -1), mode: () => mode, fixG: p.drawing.fixG || '', fixGd: p.drawing.fixGd || '',
+        /* 補足区画もタップで選べるようにする（部屋の見分けの対象と同じ範囲：v2 に差し替え中は出さない） */
+        extraFaces: p.drawing.reader === 'v2' ? [] : (p.drawing.polyFaces || []).map(f => ({ i: f.i, poly: f.poly, area: f.area, cx: f.cx, cy: f.cy })),
         extraTools: `<button class="iconbtn" data-act="dwgFs" title="${dwgFs ? '全画面をやめる' : '全画面で編集する'}" aria-label="${dwgFs ? '全画面をやめる' : '全画面で編集する'}">${icon(dwgFs ? 'shrink' : 'full')}</button>`,
         marks: () => faceMarks(),
         /* 部屋にした区画は、区画ごとの番号を消して、部屋に1つだけ名前と広さを出す（かつ「まとめたら細かい区画の数字消して真ん中にまとめた数字に」） */
@@ -1435,7 +1445,10 @@ function stepRooms(ctx) {
           const fs = new Set(r.faces); Object.entries(J).forEach(([a, b]) => { if (fs.has(b)) fs.add(+a); });
           return { faces: [...fs], color: r.color, name: r.name || '部屋', area: r.area }; }); },
         dtexts: () => textMarksOf(faceMarks()),
-        onTap: (i, how) => { if (how && how.around && !sel.has(i) && !owner().has(i)) { const f = p.drawing.plan.faces.find(z => z.i === i); toast(`区画の無い所（机・棚などの所）を押したので、まわりの区画${f ? f.no : ''} を選びました`, { ms: 4000 }); }
+        onTap: (i, how) => { if (typeof i === 'string') { /* 補足区画（線から起こした区画）：部屋にはできないが、タップで選んで場所と広さを確認できる（今まではタップ判定に入っておらず、無反応か隣の区画になっていた） */
+            if (supSel.has(i)) supSel.delete(i); else { supSel.clear(); supSel.add(i); } sel.clear(); paintSel(); return; }
+          supSel.clear();
+          if (how && how.around && !sel.has(i) && !owner().has(i)) { const f = p.drawing.plan.faces.find(z => z.i === i); toast(`区画の無い所（机・棚などの所）を押したので、まわりの区画${f ? f.no : ''} を選びました`, { ms: 4000 }); }
           if (!sel.has(i) && owner().has(i)) {
             /* もう部屋に入っている区画は、タップしただけでは選ばない（まとめた後に触ってしまっても崩れないように）。選び直す時は知らせのボタンで */
             const r = p.rooms.find(q => (q.faces || []).includes(i) || (q.faces || []).includes(joinRoot(i))), f = p.drawing.plan.faces.find(z => z.i === i);
@@ -2041,7 +2054,7 @@ function stepRooms(ctx) {
       }
       if (a === 'mkOne') return makeRooms(false);
       if (a === 'mkEach') return makeRooms(true);
-      if (a === 'selClear') { sel.clear(); paintSel(); return; }
+      if (a === 'selClear') { sel.clear(); supSel.clear(); paintSel(); return; }
       if (a === 'lMakeAll') { const own = owner(), mk = faceMarks() || {}; p.drawing.plan.faces.forEach(f => { if (!own.has(f.i) && !mk[f.i]) sel.add(f.i); }); return makeRooms(true); }
       if (a === 'selSame') {
         /* 選んだ区画と同じ大きさ（面積も周りの長さも 2% 以内か 0.02 以内）の、まだ部屋にしていない区画を足す。トイレのブースなどをまとめて選ぶ */

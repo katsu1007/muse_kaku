@@ -161,6 +161,17 @@ table.list td.r, table.list th.r { text-align: right; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
 .chip { font-size: 12.5px; padding: 5px 10px; border-radius: 9px; background: var(--panel2); border: 1px solid var(--line); color: var(--muted); }
 .chip b { color: var(--text); font-variant-numeric: tabular-nums; }
+/* 部屋カードの頭に出す合計の帯：床・壁・天井を大きく、周り・巾木・天井高は静かに */
+.rtot { display: flex; flex-wrap: wrap; gap: 6px 20px; align-items: baseline; background: var(--panel2); border: 1px solid var(--line); border-radius: 11px; padding: 9px 12px; margin-bottom: 12px; }
+.rt { display: inline-flex; align-items: baseline; gap: 5px; white-space: nowrap; }
+.rt i { font-style: normal; font-size: 12px; font-weight: 700; letter-spacing: .05em; color: var(--faint); }
+.rt b { font-size: 16.5px; font-weight: 750; color: var(--text); font-variant-numeric: tabular-nums; }
+.rt u { text-decoration: none; font-size: 11.5px; color: var(--faint); }
+.rt.sub b { font-size: 13.5px; font-weight: 650; }
+.rt .rtx { font-size: 12.5px; color: var(--muted); }
+.rt.open b { color: var(--info); }
+.rt.warn i, .rt.warn b, .rt.warn em { color: var(--warn); }
+.rt em { font-style: normal; font-size: 12px; }
 .wins { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
 .winrow { display: grid; grid-template-columns: 1fr 1fr 90px 40px; gap: 8px; align-items: end; }
 details.more > summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 8px 0 0; list-style: none; }

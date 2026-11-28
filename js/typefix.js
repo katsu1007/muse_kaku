@@ -266,6 +266,34 @@ export function correctFixtureTypes(fixtures = [], { verdicts = [], texts = [], 
       }
     }
 
+    /* ルール8 植栽のプランターは小便器ではない：エンジンが小便器と言った箱が、
+       ほぼ正方形（長辺が短辺の 1.15 倍まで）で、同じ大きさの小便器が中心間隔
+       0.6m 以内の連なりで4個以上の帯になっている物。本物の小便器は奥行きが
+       幅よりはっきり長く（実測 344×503・380×620 など）、並ぶ時も中心間隔は
+       0.75m 以上ある。プランターは幅と奥行きがほぼ同じで、帯として接して並ぶ
+       （江南 F21〜F28：335×353 が8個、中心間隔 0.41〜0.49m・すき間 0.07〜0.16m。
+       村中さんが植栽と目視確定済み）。
+       辞書の寸法判定はこの形を小便器と読む（生判定は hit 0.93、表示では僅差で
+       類似に落ちる）が、寸法だけでは植栽と分かれないので、帯の構造を根拠にする。
+       水まわりの文字が近くにある物は触らない（本物の小便器の列を落とさない）。
+       近くに「植栽」の文字がある時も同じ扱いにする（図面が自分で名付けている。
+       こちらは並びの条件なしで落とす） */
+    if (a.t === 'urinal') {
+      const pl = nearText(a, /植栽/, 1.5);
+      if (pl && !(vHit && vCat !== '小便器')) return { shown: 'other', rule: 'planter-not-urinal', confirm: false,
+        reason: `近くに「${pl.t}」の文字があるため、小便器ではなく、器具ではない物として表示` };
+      if (a.long <= a.short * 1.15 && !nearText(a, WET_TEXT, 2.5)) {
+        /* 同じ大きさの小便器どうしを、そろった並び＋中心間隔 0.6m 以内でつないだ帯 */
+        const kin = live.filter(o => o.t === 'urinal'
+          && Math.abs(o.short - a.short) <= 30 && Math.abs(o.long - a.long) <= 30
+          && (Math.abs(o.c[1] - a.c[1]) <= 0.15 || Math.abs(o.c[0] - a.c[0]) <= 0.15));
+        const band = new Set([a]); let grew = true;
+        while (grew) { grew = false; for (const o of kin) { if (band.has(o)) continue; for (const m of band) { if (dist(o.c, m.c) <= 0.6) { band.add(o); grew = true; break; } } } }
+        if (band.size >= 4) return { shown: 'other', rule: 'planter-not-urinal', confirm: false,
+          reason: `ほぼ正方形（${Math.round(a.short)}×${Math.round(a.long)}mm）の同じ大きさが、接して${band.size}個並ぶ帯で、水まわりの文字も近くに無いため、小便器ではなく植栽のプランターなど器具ではない物として表示` };
+      }
+    }
+
     /* ルール3 浴槽（sw.46 で変換を停止し、要確認マークのみ）：寸法が浴槽の帯に
        入り、排水口の文字がそばにある物。かつては浴槽に変換していたが、その根拠は
        「合体した箱の寸法」と「近くの文字」だけで、どちらも器具そのものを指して

@@ -294,6 +294,52 @@ test('hasTankBand：箱を大きく横切る通り線は帯と数えない（三
   assert.equal(hasTankBand(b, tankFor(0, 0, 0.349, 0.620)), true);
 });
 
+/* ===== ルール8 植栽のプランターは小便器ではない（江南 F21〜F28 の実測） ===== */
+
+test('プランター：335×353 の小便器が接して8個並ぶ帯 → 器具ではない物に補正', () => {
+  const F = []; for (let k = 0; k < 8; k++) F.push(fx('urinal', 0.335, 0.353, -k * 0.45, 0));
+  const r = run(F, F.map(() => near('小便器')));
+  assert.ok(r.every(x => x && x.shown === 'other' && x.rule === 'planter-not-urinal' && !x.confirm));
+});
+
+test('プランター：本物の小便器の列（344×503・間あり）は触らない', () => {
+  const F = []; for (let k = 0; k < 5; k++) F.push(fx('urinal', 0.344, 0.503, 0, k * 0.8));
+  const r = run(F, F.map(() => unk));
+  assert.ok(r.every(x => x === null));
+});
+
+test('プランター：辞書の寸法判定が小便器 hit でも、帯の構造がそろえば落とす（江南の実例）', () => {
+  /* 江南 F21〜F28 は生判定 hit・小便器 0.93（表示は僅差で類似）。寸法だけでは
+   * 植栽と分かれないので、hit であること自体は歯止めにしない */
+  const F = []; for (let k = 0; k < 8; k++) F.push(fx('urinal', 0.335, 0.353, -k * 0.45, 0));
+  const r = run(F, F.map(() => hit('小便器')));
+  assert.ok(r.every(x => x && x.shown === 'other' && x.rule === 'planter-not-urinal'));
+});
+
+test('プランター：中心間隔が広い列（0.8m）は、ほぼ正方形でも帯と見ない', () => {
+  const F = []; for (let k = 0; k < 5; k++) F.push(fx('urinal', 0.380, 0.410, -k * 0.8, 0));
+  const r = run(F, F.map(() => near('小便器')), { texts: [] });
+  assert.ok(r.every(x => x === null));
+});
+
+test('プランター：水まわりの文字が近くにある帯は触らない', () => {
+  const F = []; for (let k = 0; k < 8; k++) F.push(fx('urinal', 0.335, 0.353, -k * 0.45, 0));
+  const r = run(F, F.map(() => near('小便器')), { texts: [{ t: '男子トイレ', c: [-1.5, 0.8] }] });
+  assert.ok(r.every(x => x === null));
+});
+
+test('プランター：3個だけの帯は触らない（4個以上が条件）', () => {
+  const F = []; for (let k = 0; k < 3; k++) F.push(fx('urinal', 0.335, 0.353, -k * 0.45, 0));
+  const r = run(F, F.map(() => near('小便器')));
+  assert.ok(r.every(x => x === null));
+});
+
+test('プランター：「植栽」の文字が近くにある小便器は、並んでいなくても落とす', () => {
+  const F = [fx('urinal', 0.380, 0.620, 0, 0)];
+  const r = run(F, [near('小便器')], { texts: [{ t: '植栽', c: [0.8, 0.3] }] });
+  assert.ok(r[0] && r[0].shown === 'other' && r[0].rule === 'planter-not-urinal');
+});
+
 /* ===== 槽の内形（sw.46・ルール4 の歯止め） ===== */
 
 test('hasBasinFace：内側の槽の面だけを数える', () => {
