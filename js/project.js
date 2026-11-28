@@ -13,6 +13,7 @@ import { planView, roomColor } from './planview.js';
 import { classifyFixtureDisplay, classifyCluster, buildChairContexts, bareClusterFlags, nonObjectFlags, titleRegionFlags, slimSymFeat, SYM_VERDICTS, SYM_DICT } from './symdict.js';
 import { detectFurniture } from './furndetect.js';
 import { rescueFixtures, mergeFixtures } from './fixrescue.js';
+import { promoteFixtures } from './fixpromote.js';
 import { applyEdgeFix, revertEdgeFix } from './facerepair.js';
 import { createShapeIndex } from './fixshape.js';
 import { judgeRooms, ROOM_JUDGE } from './roomjudge.js';
@@ -477,6 +478,10 @@ export function symList(d) {
     /* 器具の救済が線の形で和便器と決めた物（how:'jbowl'）は、寸法だけの辞書判定より形の判定を出す
      * （拾い方と符の表示を揃える。sw.51：kaku_generation の how の仕組みのうち和便器だけを取り込み） */
     if (x && x.how === 'jbowl' && !(r && r.mine)) return { k, b: x.b, t: x.t, ...r, verdict: 'hit', rawVerdict: 'hit', category: '和式便器', shape: 'jbowl', capped: false, sizeVeto: null, learnFeat };
+    /* 家具から昇格した器具（how:'promote'）も、拾った時の辞書判定（クラスタの形判定）を
+     * そのまま出す（jbowl と同じ「拾い方と符の表示を揃える」。器具の箱だけの形判定では
+     * 洗面器に化ける実測があるため、箱の判定で上書きしない） */
+    if (x && x.how === 'promote' && x.promo && !(r && r.mine)) return { k, b: x.b, t: x.t, ...r, verdict: 'hit', rawVerdict: 'hit', category: x.promo.category, score: x.promo.score, shape: 'promote', capped: false, sizeVeto: null, learnFeat };
     return { k, b: x && x.b, t: x && x.t, ...r, learnFeat };
   }).filter((s, k) => s.b && !titleFlags[k]);
   /* 素の四角ガード（試行・2026-11-22 tagtrial）：仕上表のセル・柱など「物ではない物」が
@@ -496,6 +501,7 @@ export function symList(d) {
   try { ctxs = buildChairContexts(fu, baseFu, { zones: d.zones || [], faces, fixtures: fx, texts: (src2 && src2.texts) || [] }, scale); } catch (e) { ctxs = []; }
   fu.forEach((x, j) => {
     if (!x || !x.b) return;
+    if (x.promoted) return; /* 器具に昇格した家具（js/fixpromote.js）は器具側に出す */
     if (exclFlags[j]) return; /* 層B：物ではない物は一覧に出さない */
     const r = ctxs[j] ? classifyCluster(x, mine, ctxs[j], scale, bareFlags[j]) : baseFu[j];
     if (!r || r.verdict === 'unknown') return; /* 家具の候補は「不明」を並べない（線の集まりは数が多く、判定できた物だけ出す） */
@@ -539,8 +545,9 @@ export function typeFixMap(d) {
     if (needFaces) { try { faces = polygonizeFaces(psegs); } catch (e) { faces = null; } }
   }
   let map = fx.map(() => null);
-  /* 線の形で決めた器具（how:'jbowl'）は、種類の直し（寸法と文脈の補正）の対象にしない＝手で直した器具と同じ扱い（sw.51） */
-  const fxT = fx.map(x => (x && x.how === 'jbowl' && !x.edited) ? { ...x, edited: true } : x);
+  /* 線の形で決めた器具（how:'jbowl'）は、種類の直し（寸法と文脈の補正）の対象にしない＝手で直した器具と同じ扱い（sw.51）。
+   * 家具から昇格した器具（how:'promote'）も形と部屋の裏付けで決めた物なので同じ扱い（sw.59） */
+  const fxT = fx.map(x => (x && (x.how === 'jbowl' || x.how === 'promote') && !x.edited) ? { ...x, edited: true } : x);
   try { map = correctFixtureTypes(fxT, { verdicts, texts: (d.src2 && d.src2.texts) || [], zoneNames: (d.zones || []).map(z => z.name).filter(Boolean), scale, faces, segs }); }
   catch (e) { console.warn('器具のタイプ補正に失敗', e); }
   tfCache.set(d, { S, tsig, zsig, psegs, map });
@@ -1688,6 +1695,27 @@ function stepRooms(ctx) {
           } catch (e3) { console.warn('補足区画の家具線の除外に失敗', e3); }
           p.drawing.polyFaces = supplementFaces({ segs: suppSegs, faces: res.plan.faces || [], fixtures: allFixtures, texts: res.texts || [], doors: res.doorList || [], tableBoxes: [...tb, ...rb] });
         } catch (e2) { console.warn('補足区画の作成に失敗', e2); p.drawing.polyFaces = []; } }
+        /* 家具→器具の昇格（js/fixpromote.js）：便所・湯沸室の中で、辞書の形判定が単独で
+         * 確定した便器・小便器の家具クラスタを器具に足す（大天の衛生器具0件対策）。
+         * ゾーン・補足区画・解析が全部済んだ後に足すので、それらの数字は従来と変わらない。
+         * 判定の材料は symList の素の判定と同じ（自分の辞書・倍率・素の四角ガード込み、
+         * 文脈で確定した物は上げない）。昇格したクラスタには印を付け、一覧では器具側に出す */
+        if (cad) { try {
+          const fu = p.drawing.furn || [];
+          if (fu.length && (p.drawing.zones || []).length) {
+            const mine = userSyms();
+            const ssP = symScaleFor(p.drawing);
+            const scP = (ssP && ssP.factor > 0) ? ssP.factor : 1;
+            const bfP = bareClusterFlags(fu, (p.drawing.src2 && p.drawing.src2.texts) || []);
+            const baseP = fu.map((x, j) => (x && x.b) ? classifyCluster(x, mine, null, scP, bfP[j]) : null);
+            const prom = promoteFixtures({ clusters: fu, verdicts: baseP, zones: p.drawing.zones || [], faces: res.plan.faces || [], fixtures: allFixtures });
+            if (prom.length) {
+              prom.forEach(pm => { fu[pm.j].promoted = true; });
+              allFixtures = [...allFixtures, ...prom.map(pm => ({ b: pm.b, t: pm.t, src: 'promote', how: 'promote', promo: { category: pm.category, score: pm.score } }))];
+              p.drawing.fixtures = allFixtures;
+            }
+          }
+        } catch (e2) { console.warn('器具への昇格に失敗', e2); } }
         if (cad && res.v2) { try { const P2 = { faces: res.v2.faces }; orderFacesOf(P2);
           /* 扉の無い開口は「区画の辺に壁の線が無い所」で決めるので、区画の形が壁の線に沿っていないと、辺のほとんどが開口になる。
            * 開口が周りの3割以上になる区画は、形が合っていないと見て、扉の無い開口を引かない（分からない物を引かない。ドアは残す） */
